@@ -1,21 +1,25 @@
 ---
 name: switch-resolution-pchtxt
 description: >-
-  Author Nintendo Switch resolution and level-of-detail (LOD) exefs pchtxt mods
-  by reverse-engineering the game's scan-buffer size and texture-sampler LOD-bias
-  setup in IDA, then emitting IPSwitch-format patch files. Use when asked to make
-  a "1920x1080 / 1440p / 4K resolution mod", an "LOD" / texture-sharpening mod, or
-  any pchtxt that rewrites a packed WxH constant or a sampler LOD bias for a Switch
-  title (Ryujinx / Atmosphere).
+  Author Nintendo Switch render-resolution exefs pchtxt mods by reverse-engineering
+  the game's packed scan-buffer size constant in IDA, plus the GPU pools, heap
+  partitions, UI canvas and dynamic-resolution clamp that must be patched with it.
+  Use when asked to make a "1920x1080 / 1440p / 4K resolution mod", an
+  "anti-dynamic-resolution" pin, or any pchtxt that rewrites a packed WxH constant
+  for a Switch title (Ryujinx / Atmosphere).
 ---
 
-# Switch resolution & LOD pchtxt mods
+# Switch resolution pchtxt mods
 
-This skill captures the end-to-end method for producing resolution and LOD
-patches as **exefs pchtxt** (IPSwitch) mods. It was derived working on the
-Splatoon 2 / Blitz (Cstm/Lp + nn::gfx NVN) engine, but the technique generalizes
-to any title that stores its output resolution as a packed 64-bit `width|height`
-constant and configures samplers through `nn::gfx`.
+This skill captures the end-to-end method for producing render-resolution patches
+as **exefs pchtxt** (IPSwitch) mods. It was derived working on the Splatoon 2 /
+Blitz (Cstm/Lp + gsys/agl + nn::gfx NVN) engine, but the technique generalizes to
+any title that stores its output resolution as a packed 64-bit `width|height`
+constant.
+
+Sibling skills, each its own mod folder: `switch-lod-bias-pchtxt` (texture LOD
+bias) and `switch-shadow-resolution-pchtxt` (shadow-map size — it draws from the
+same GPU pool as §2b, so read them together).
 
 Deliver patches as pchtxt only. Never modify the game dump. Open IDBs **in place**
 (no copies).
@@ -94,38 +98,6 @@ address) must be a **MOVZ** (it clears the whole register); the second must be a
 
 Replacing `ORR` with `MOVZ` is fine and often required (many widths — e.g. 2560 =
 0xA00 — are not encodable as an ORR bitmask immediate).
-
-## 2. LOD: sampler mip-LOD bias
-
-The classic "LOD"/texture-sharpening mod forces the sampler mip-LOD bias to `-1.0`.
-In `nn::gfx`, `SamplerImpl::Initialize` copies `SamplerInfo.lodBias` (float at
-struct offset **0x10**) into `s0` and calls `nvnSamplerBuilderSetLodBias`:
-
-```
-LDR S0, [X20,#0x10]                ; <- patch this
-LDR X8, [X8,#...]                  ; pfnc_nvnSamplerBuilderSetLodBias
-LDR X8, [X8]
-MOV X0, SP
-BLR X8
-```
-
-Replace `LDR S0,[Xn,#0x10]` with **`FMOV S0, #-1.0`** = bytes `00103E1E`
-(word `0x1E3E1000`).
-
-### Finding it
-The setter calls go through GOT pointers with a stable idiom
-`LDR X8,[X8]; MOV X0,SP; BLR X8` = `08 01 40 F9 E0 03 00 91 00 01 3F D6`. The LOD
-bias load sits between the `setLodClamp` (`LDP S0,S1,[Xn,#8]`) and `setLodBias`
-calls. Search this masked fingerprint (register/PC-relative bytes wildcarded):
-
-```
-?? ?? 41 2D ?? ?? ?? ?? 08 01 40 F9 E0 03 00 91 00 01 3F D6 ?? ?? ?? ?? ?? ?? 40 BD ?? ?? ?? ?? 08 01 40 F9 E0 03 00 91 00 01 3F D6
-```
-
-It is unique per build. The `LDR S0,[Xn,#0x10]` to patch is at **match + 0x18**.
-Always `disasm` that address to confirm the next instruction references
-`SetLodBias` before trusting it. (Confirm by symbol too if present:
-`nn::gfx::detail::SamplerImpl<...>::Initialize`.)
 
 ## 2b. Fixed GPU pools must scale with resolution (or the game aborts)
 
@@ -299,7 +271,11 @@ def enc(op, imm, lsl, rd=9):
 ```
 
 Common values: width 1920=0x780 2560=0xA00 3840=0xF00; height 1080=0x438 1440=0x5A0 2160=0x870.
-FMOV S0,#-1.0 = `00103E1E`. (Sanity: `MOVZ X9,#2580` must equal `894281D2`.)
+(Sanity: `MOVZ X9,#2580` must equal `894281D2`.)
+
+Also used by §2b–§2d: `MOVZ Wd,#imm` = `0x52800000|(imm<<5)|d`;
+`MOVZ Wd,#imm,LSL#16` = `0x52A00000|(imm<<5)|d` (value = `imm<<16`);
+`FMOV Sd,Wn` = `0x1E270000|(n<<5)|d`; `NOP` = `0xD503201F`.
 
 ## 4. Verification checklist (do every time)
 1. `get_bytes` the original slots; confirm register, encoding, and slot order.
@@ -318,7 +294,7 @@ FMOV S0,#-1.0 = `00103E1E`. (Sanity: `MOVZ X9,#2580` must equal `894281D2`.)
    `Window.CaptureFrame` grabs the guest texture at guest dimensions, so the PNG
    size is the true presented resolution. If it still reads native while the log
    shows a larger framebuffer, look for a dynamic-resolution clamp (§2d).
-7. Read the crash log's guest `PROGRAM HALT` block before changing anything: it
+8. Read the crash log's guest `PROGRAM HALT` block before changing anything: it
    names the file, the heap, the requested size and the available size. Let it pick
    the constant to patch instead of guessing.
 
@@ -333,8 +309,13 @@ so all builds sharing a title ID coexist and only the matching one applies):
   [1920x1080]/exefs/<Build label>.pchtxt   # e.g. "20170328 Proto.pchtxt", "1.1.0 QA B2.pchtxt"
   [2560x1440]/exefs/<Build label>.pchtxt
   [3840x2160]/exefs/<Build label>.pchtxt
-  [Level of Detail]/exefs/<Build label>.pchtxt
+  [Level of Detail]/exefs/<Build label>.pchtxt          # switch-lod-bias-pchtxt
+  [Shadow Resolution 2048]/exefs/<Build label>.pchtxt   # switch-shadow-resolution-pchtxt
 ```
+**Each offset must be owned by exactly one mod folder.** Two enabled mods writing
+the same offset with different values is order-dependent — so the pool/heap
+enlargements live only in the resolution mods, and the sibling mods reference them
+rather than repeating them.
 Title IDs differ **by region**, not by dev-vs-retail (Splatoon 2:
 `01003C700009C000` JP, `01003BC0000A0000` global). Builds of the same game can
 therefore land in different top-level folders even though the mods are conceptually

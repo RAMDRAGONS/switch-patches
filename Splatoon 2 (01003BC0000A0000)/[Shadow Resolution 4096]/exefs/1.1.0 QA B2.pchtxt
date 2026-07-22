@@ -1,0 +1,33 @@
+@nsobid-FA3897E0FADDD49C69ED00F23E705B3E
+
+# Splatoon 2 1.1.0 QA Build 2 - 4096x4096 shadow resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces the sun/cascade depth-shadow map to 4096x4096 (stock default 1024x1024).
+// Every frame gsys::ModelSceneShadow::drawDepthShadow reads the two shadow-map
+// dimensions out of gsys::ModelSceneConfig (the depth_shadow_tex_width /
+// depth_shadow_tex_height env parameters), multiplies them by the viewport ratio,
+// clamps the result so it can never EXCEED the configured value, and hands that to
+// agl::sdw::ShadowMap::setSize. That clamp is why raising the render resolution on
+// its own leaves shadows at their original size. These two lines replace the config
+// reads with immediates, so the shadow map is pinned to a fixed size instead.
+//
+// MEMORY: the shadow map is allocated per frame from the same fixed
+// DynamicTextureAllocator pool as the post-effect buffers, and it grows with the
+// SQUARE of this number (4096x4096 is 16x the texels of stock 1024x1024).
+// Pair this with one of the [WxH] resolution mods, which enlarge that pool. If the
+// game aborts in agl::utl::DynamicTextureAllocator::alloc_ ("alloc failed ... free
+// size"), the pool is too small for this shadow size at that resolution -- step down
+// a shadow size or up a resolution mod.
+
+@enabled
+013E9A2C 09008252
+013E9A30 08008252
+@stop
+
+// Shadow-map sizing reverse-engineered against the gsys/agl engine
+// (gsys::ModelSceneShadow::drawDepthShadow -> agl::sdw::ShadowMap::setSize).
+//
+// https://github.com/RAMDRAGONS/switch-visuen-mods
