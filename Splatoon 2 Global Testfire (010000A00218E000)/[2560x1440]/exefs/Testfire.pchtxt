@@ -1,0 +1,80 @@
+@nsobid-0F129135D8A7621C9E4940B0C3808BF0
+
+# Splatoon 2 Global Testfire - 2560x1440 resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces the render resolution to 2560x1440 (native 1280x720).
+//
+// This build predates the March prototypes and carries TWO INDEPENDENT sizes,
+// so both have to be patched:
+//
+//  1. The scan-out / presented size, from the packed WxH constant in
+//     Lp::Sys::ISysInitCstm::getScanBufferSize. Here it feeds only the layer
+//     helpers (Lp::Utl::changeGfxLayerPosSize, getScanBufferHalfSize,
+//     layerScrPosToFullScrPos, checkOnLayerId) -- this is what sets the size of
+//     the image that reaches the display, i.e. what a screenshot measures.
+//
+//  2. The internal 3D render size. Unlike every later build, this one's
+//     Cstm::RootTask::getGsysCreateArg never writes a render size, so it keeps the
+//     defaults baked into gsys::SystemTask::CreateArg::CreateArg. Later builds copy
+//     the scan buffer into that field, which is why one constant is enough there
+//     and not here: patching only #1 gives an upscaled 720p image, only #2 gives a
+//     sharp render squeezed back into a 720p output.
+//
+// The constructor loads 1280/720 into one register pair and stores it to three
+// fields: +0x20 (2D/UI canvas), +0x28, and +0x30 (render size). Only +0x30 may
+// change -- growing the canvas would leave the 720p-authored HUD drawn small in a
+// corner. Rewritten as: build 1280x720 once in X9 and store it to +0x20 and +0x28
+// with a single STP X9,X9; build the target in X10 and STR it to +0x30. The two
+// freed slots come from folding the vtable load (ADRP+LDR+ADD) into ADRP+ADD.
+// MEMORY: total heap arrangement ~2560 MB against the ~2.9 GiB the default
+// 4 GiB DRAM Size gives the game -- it fits, but with little slack left for the
+// engine's 'cOthers' heap. If boot aborts with a heap failure, raise
+// Ryujinx > System > DRAM Size to 6 GiB.
+
+@enabled
+// (1) scan-out size: the packed WxH scan-buffer constant.
+00162738 09B4C0D2
+0016273C 094081F2
+// Pin the 2D/UI virtual canvas to 1280x720 instead of letting it follow the scan
+// buffer (Lp::Sys::ISysInitCstm::getVirtualCanvasSize derives it from the constant
+// above). The HUD/menu layouts are authored in 720p units, so a canvas that grows
+// with the resolution leaves the UI drawn at its original pixel size in a corner.
+00162790 08A08052
+00162794 0001271E
+00162798 085A8052
+0016279C 0101271E
+001627A0 1F2003D5
+// (2) internal render size: rewrite of gsys::SystemTask::CreateArg::CreateArg.
+00E78C58 C8E300F0
+00E78C5C 08412991
+00E78C60 09A080D2
+00E78C64 095AC0F2
+00E78C68 092402A9
+00E78C6C 0A4081D2
+00E78C74 0AB4C0F2
+00E78C78 0A1800F9
+// Enlarge the fixed dynamic-texture GPU pool so Depth-of-Field / post-effect
+// buffers fit at this resolution (Cmn::GfxMgr::getDynamicTextureAllocatorMemSize, 64 MB -> 256 MB).
+// Without this the game aborts in agl::utl::DynamicTextureAllocator::alloc_ (pool exhausted).
+00082E74 0000A252
+// Enlarge the graphics heap partition (Cstm heap arrangement mGfxSize) so the bigger
+// dynamic-texture pool above can actually be carved from it (132 MB -> 576 MB). Without this the
+// game aborts at boot in agl::Initialize -> DynamicTextureAllocator::initialize (heap too small).
+0015B7D0 0A80A452
+// Enlarge the system heap partition (Cstm heap arrangement mSysSize, 200 MB -> 384 MB).
+// Every Lp/Cmn manager task carves its heap out of whatever is left of this heap, so
+// once the higher resolution eats into it the tasks created last get nothing -- seen on
+// the March builds as "heap create failed. [Coconut]" in Cmn::CoconutMgr::prepare.
+0015B7CC 0900A352
+@stop
+
+// NOTE: this build has no dynamic-resolution controller (Cmn::GPUPerfController),
+// so unlike the 1.1.0 QA / 5.5.2 patches nothing here has to defeat a display crop.
+
+// Resolution/LOD technique derived from Fl4sh9174's retail Splatoon 2 5.5.x mods.
+// Remaining offsets reverse-engineered against the Cstm/Lp + gsys/agl engine.
+//
+// https://github.com/RAMDRAGONS/switch-visuen-mods

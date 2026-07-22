@@ -88,6 +88,39 @@ Observed:
    and its two RVAs. `get_bytes` the 8 bytes to confirm the exact encoding/order
    of each 4-byte slot.
 
+### Scan-out size and render size can be two different constants
+Do not assume this constant is *the* resolution. In the oldest Blitz build it drives
+only the **scan-out** (the size of the image reaching the display, i.e. what a
+screenshot measures), because it is consumed by the layer helpers
+(`changeGfxLayerPosSize`, `getScanBufferHalfSize`, `layerScrPosToFullScrPos`), while
+the **internal 3D render size** comes from the defaults in the graphics create-arg
+constructor (`gsys::SystemTask::CreateArg::CreateArg`) — that build's
+`getGsysCreateArg` never writes a size. Later builds copy the scan buffer into that
+create-arg field, so one constant covers both; older ones need **both patched**.
+
+The two failure modes are diagnostic, so test with screenshots and read them together:
+- screenshot grows, image looks no sharper → you patched the scan-out only (the render
+  is still native and being upscaled);
+- screenshot stays native → you patched the render only (a sharp frame resolved back
+  down into a native-size output).
+
+A quick static check: **count the callers of the wrapper** (`Lp::Utl::getScanBufferSize`).
+Zero xrefs does *not* mean the constant is dead — the getter is virtual, so callers
+reach it through the vtable. Instead xref the singleton pointer (`ISysInitCstm::spCstm`)
+to enumerate everything that pulls sizes off it, and note which of those are layer /
+screen-space helpers versus renderer setup.
+
+Constructors like this typically load one `W`-pair (e.g. 1280/720) and `STP` it to
+**several** fields — UI canvas, a reference size, and the render size — so you must
+change only the render field. With no spare instruction slots, buy them:
+- store two adjacent 8-byte fields with a single `STP Xn, Xn, [X0,#off]` after
+  packing the pair into one 64-bit register (`MOVZ` + `MOVK ..., LSL#32`);
+- fold a vtable load `ADRP + LDR + ADD` into `ADRP + ADD` when the target address is
+  statically known.
+Then write the new size with `MOVZ Xm,#W` / `MOVK Xm,#H,LSL#32` / `STR Xm,[X0,#off]`.
+Verify the scratch registers are dead (re-loaded before their next use) before reusing
+them, and validate your `ADRP` encoding by re-deriving an existing one byte-for-byte.
+
 ### Patching it (robust rule)
 Overwrite **both** 4-byte slots. Requirements: the **first-executed** slot (lower
 address) must be a **MOVZ** (it clears the whole register); the second must be a
