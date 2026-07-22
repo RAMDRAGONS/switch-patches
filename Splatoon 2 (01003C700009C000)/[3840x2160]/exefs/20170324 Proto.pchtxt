@@ -1,0 +1,47 @@
+@nsobid-1F1C44F29E77B5D6C7AA5A518E724318
+
+# Splatoon 2 March 24 2017 prototype - 3840x2160 resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces the render/scan-buffer resolution to 3840x2160 (native 1280x720).
+// Patches Lp::Sys::ISysInitCstm::getScanBufferSize (the packed WxH scan-buffer constant).
+// MEMORY: total heap arrangement ~3720 MB, which exceeds the ~2.9 GiB the default
+// 4 GiB DRAM Size gives the game. Set Ryujinx > System > DRAM Size to 6 GiB or
+// higher (6 / 8 / 12 GiB) before launching, or boot aborts while creating the
+// graphics heap.
+
+@enabled
+001F7AA0 090EC1D2
+001F7AA4 09E081F2
+// Pin the 2D/UI virtual canvas to 1280x720 instead of letting it follow the
+// scan buffer (Lp::Sys::ISysInitCstm::getVirtualCanvasSize). The HUD/menu layouts
+// in this build are authored in 720p units, so a canvas that grows with the
+// resolution leaves the UI drawn at its original pixel size in a corner of the
+// frame. Later builds hardcode 1280x720 here; this restores that behaviour.
+001F7AF8 08A08052
+001F7AFC 0001271E
+001F7B00 085A8052
+001F7B04 0101271E
+001F7B08 1F2003D5
+// Enlarge the fixed dynamic-texture GPU pool so Depth-of-Field / post-effect
+// buffers fit at this resolution (Cmn::GfxMgr::getDynamicTextureAllocatorMemSize, 64 MB -> 576 MB).
+// Without this the game aborts in agl::utl::DynamicTextureAllocator::alloc_ (pool exhausted).
+000B5C34 0080A452
+// Enlarge the graphics heap partition (Cstm heap arrangement mGfxSize) so the bigger
+// dynamic-texture pool above can actually be carved from it (132 MB -> 1280 MB). Without this the
+// game aborts at boot in agl::Initialize -> DynamicTextureAllocator::initialize (heap too small).
+001EE74C 0A00AA52
+// Enlarge the system heap partition (Cstm heap arrangement mSysSize, 180 MB -> 640 MB).
+// Every Lp/Cmn manager task carves its heap out of whatever is left of this heap, so
+// once the higher resolution eats into it the tasks created last get nothing -- seen on
+// the March builds as "heap create failed. [Coconut]" in Cmn::CoconutMgr::prepare.
+001EE748 0900A552
+@stop
+
+// Resolution/LOD technique derived from Fl4sh9174's retail Splatoon 2 5.5.x mods.
+// Dev-build offsets reverse-engineered against the Cstm/Lp engine
+// (Lp::Sys::ISysInitCstm::getScanBufferSize / nn::gfx SamplerImpl::Initialize).
+//
+// https://github.com/RAMDRAGONS/switch-visuen-mods

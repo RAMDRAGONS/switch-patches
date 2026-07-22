@@ -1,0 +1,21 @@
+@nsobid-51A5F17583DE73E0038772960B42E091
+
+# Splatoon 2 March 28 2017 prototype - Level of Detail
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces the texture sampler mip-LOD bias to -1.0 for sharper textures.
+// Patches nn::gfx::detail::SamplerImpl::Initialize: the LDR S0,[X20,#0x10]
+// that loads SamplerInfo.lodBias just before nvnSamplerBuilderSetLodBias,
+// replaced with FMOV S0, #-1.0.
+
+@enabled
+016B8CDC 00103E1E
+@stop
+
+// Resolution/LOD technique derived from Fl4sh9174's retail Splatoon 2 5.5.x mods.
+// Dev-build offsets reverse-engineered against the Cstm/Lp engine
+// (Lp::Sys::ISysInitCstm::getScanBufferSize / nn::gfx SamplerImpl::Initialize).
+//
+// https://github.com/RAMDRAGONS/switch-visuen-mods

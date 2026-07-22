@@ -1,0 +1,35 @@
+@nsobid-FA3897E0FADDD49C69ED00F23E705B3E
+
+# Splatoon 2 1.1.0 QA Build 2 - 1920x1080 resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// NOTE: this build already renders 1920x1080 natively, so this patch
+// simply pins the scan-buffer to 1080p and disables dynamic resolution, i.e. it
+// holds the game at a constant native 1080p instead of letting it drop under load.
+// Patches Cstm::SysInit::getScanBufferSize (the packed WxH scan-buffer constant).
+// MEMORY: total heap arrangement ~2250 MB. Fits the default 4 GiB Ryujinx
+// DRAM Size (System > DRAM Size), which gives the game ~2.9 GiB of heap.
+
+@enabled
+00231630 09F080D2
+00231634 0987C0F2
+// Defeat the dynamic-resolution controller (Cmn::GPUPerfController). It reads the
+// scan-buffer size every frame and then clamps the presented image two ways:
+// updateFrameBufferScale_ scales the framebuffer down, and calc() pins
+// sead::GraphicsNvn::setDisplayBufferWindowCrop to an ABSOLUTE height from its
+// resolution ladder (1080p) -- so without this the render target scales but the
+// image handed to the display stays 1920x1080. Both paths are already skipped when
+// the controller's own full-resolution flag (+0xD8) is set, so force its three reads
+// to 1 (LDRB W8,[Xn,#0xD8] -> MOVZ W8,#1) and the game takes its own full-res path.
+000D21E0 28008052
+000D2238 28008052
+000D2420 28008052
+@stop
+
+// Resolution/LOD technique derived from Fl4sh9174's retail Splatoon 2 5.5.x mods.
+// Dev-build offsets reverse-engineered against the Cstm/Lp engine
+// (Lp::Sys::ISysInitCstm::getScanBufferSize / nn::gfx SamplerImpl::Initialize).
+//
+// https://github.com/RAMDRAGONS/switch-visuen-mods

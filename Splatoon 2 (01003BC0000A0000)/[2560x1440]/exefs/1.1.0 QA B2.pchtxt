@@ -1,0 +1,48 @@
+@nsobid-FA3897E0FADDD49C69ED00F23E705B3E
+
+# Splatoon 2 1.1.0 QA Build 2 - 2560x1440 resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces the render/scan-buffer resolution to 2560x1440 (native 1920x1080).
+// Patches Cstm::SysInit::getScanBufferSize (the packed WxH scan-buffer constant).
+// MEMORY: total heap arrangement ~2628 MB against the ~2.9 GiB the default
+// 4 GiB DRAM Size gives the game -- it fits, but with little slack left for the
+// engine's 'cOthers' heap. If boot aborts with a heap failure, raise
+// Ryujinx > System > DRAM Size to 6 GiB.
+
+@enabled
+00231630 094081D2
+00231634 09B4C0F2
+// Defeat the dynamic-resolution controller (Cmn::GPUPerfController). It reads the
+// scan-buffer size every frame and then clamps the presented image two ways:
+// updateFrameBufferScale_ scales the framebuffer down, and calc() pins
+// sead::GraphicsNvn::setDisplayBufferWindowCrop to an ABSOLUTE height from its
+// resolution ladder (1080p) -- so without this the render target scales but the
+// image handed to the display stays 1920x1080. Both paths are already skipped when
+// the controller's own full-resolution flag (+0xD8) is set, so force its three reads
+// to 1 (LDRB W8,[Xn,#0xD8] -> MOVZ W8,#1) and the game takes its own full-res path.
+000D21E0 28008052
+000D2238 28008052
+000D2420 28008052
+// Enlarge the fixed dynamic-texture GPU pool so Depth-of-Field / post-effect
+// buffers fit at this resolution (Cmn::GfxMgr::getDynamicTextureAllocatorMemSize, 128 MB -> 256 MB).
+// Without this the game aborts in agl::utl::DynamicTextureAllocator::alloc_ (pool exhausted).
+000C7400 0000A252
+// Enlarge the graphics heap partition (Cstm heap arrangement mGfxSize) so the bigger
+// dynamic-texture pool above can actually be carved from it (210 MB -> 448 MB). Without this the
+// game aborts at boot in agl::Initialize -> DynamicTextureAllocator::initialize (heap too small).
+00227DB0 0A80A352
+// Enlarge the system heap partition (Cstm heap arrangement mSysSize, 180 MB -> 320 MB).
+// Every Lp/Cmn manager task carves its heap out of whatever is left of this heap, so
+// once the higher resolution eats into it the tasks created last get nothing -- seen on
+// the March builds as "heap create failed. [Coconut]" in Cmn::CoconutMgr::prepare.
+00227DAC 0980A252
+@stop
+
+// Resolution/LOD technique derived from Fl4sh9174's retail Splatoon 2 5.5.x mods.
+// Dev-build offsets reverse-engineered against the Cstm/Lp engine
+// (Lp::Sys::ISysInitCstm::getScanBufferSize / nn::gfx SamplerImpl::Initialize).
+//
+// https://github.com/RAMDRAGONS/switch-visuen-mods
