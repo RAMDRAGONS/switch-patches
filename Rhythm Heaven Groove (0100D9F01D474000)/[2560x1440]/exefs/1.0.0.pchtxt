@@ -1,0 +1,50 @@
+@nsobid-03FF4A3BEC96BDE3A2E37CE3AA4CAA0CAE8935A8
+
+# Rhythm Heaven Groove 1.0.0 - 2560x1440 resolution
+
+// Rhythm Heaven Groove runs on a bespoke Nintendo engine that talks to NVN
+// and nn::vi directly.  It draws the whole frame into one offscreen render
+// target and then blits that into the scan buffer, so there are two sizes:
+//
+//   1. the scan buffer -- what reaches the display, i.e. screenshot size,
+//   2. the scene render target -- the actual internal resolution.
+//
+// (2) is handled by intercepting the engine's single render-texture creation
+// wrapper and scaling every sufficiently large request.  This is deliberately
+// proportional rather than a fixed size: RenderDoc showed stages render into
+// targets of their own native size (one at 1000x900, the main one at
+// 1920x1080), so a fixed rewrite only caught some of them.
+//
+// The engine keeps a render target's design UNITS separate from its pixel
+// size and only the pixels change here, so coordinate space, UI layout and
+// camera are untouched -- only pixel density moves.
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces the render and scan-out resolution to 2560x1440
+// (1.78x the pixels of the native 1920x1080).
+
+@enabled
+// 1. Scan buffer: the packed `height<<32 | width` constant the graphics
+//    device constructor stores at device+0x28.
+0050CBDC 084081D2
+0050CBE8 08B4C0F2
+// 2. Render-texture creation wrapper: scale every render texture wider
+//    than 512px by 1.5x.  Stages have their own native sizes (a
+//    capture showed one at 1000x900), so an exact 1920x1080 match was too
+//    narrow -- this scales whatever the engine asks for.  Small textures
+//    (glyph atlases, gradient LUTs) stay untouched.  One CMP drives both
+//    selects; the engine's own MOV W19,W1 and MOV W20,W0 sit between these
+//    lines untouched and now read the rescaled registers.
+004F5848 1F000871   // CMP  W0, #512
+004F584C 2804410B   // scaled height -> W8
+004F5850 01A1811A   // CSEL W1, W8, W1, GE
+004F5858 0804400B   // scaled width  -> W8
+004F585C 00A1801A   // CSEL W0, W8, W0, GE
+@stop
+
+// Reverse-engineered against the game's own renderer, with the frame
+// structure confirmed by RenderDoc capture.  Every offset byte-verified.
+//
+// https://github.com/RAMDRAGONS/switch-visuen-mods

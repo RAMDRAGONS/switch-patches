@@ -105,6 +105,22 @@ The two failure modes are diagnostic, so test with screenshots and read them tog
 - screenshot stays native → you patched the render only (a sharp frame resolved back
   down into a native-size output).
 
+**Engines that already separate pixels from layout are the easy case.** Look at the
+render-target constructor: if it stores a *base pixel size* (ints) **and** a
+*design size* (floats) and ends by computing a scale from
+`allocated_pixels / design_units`, the engine has built-in resolution scaling.
+Raise the base pixel size only; leave the design size alone and the coordinate
+space, UI layout and camera are untouched while pixel density rises — this is
+§2c solved for you, not a canvas you must pin. The base size is usually passed in
+by each scene/renderer subclass, so patch it at those call sites rather than in
+the shared constructor.
+
+Beware the resolution-scaling clamp that comes with such engines:
+`alloc = (screen.current < screen.max) ? current*base/max : base`. Like the
+shadow-map clamp, it **only ever shrinks** — so raising `screen.current` or
+`screen.max` does nothing, and the base size is the only lever. (Raising the
+screen values is still harmless and keeps handheld mode scaling proportionally.)
+
 A quick static check: **count the callers of the wrapper** (`Lp::Utl::getScanBufferSize`).
 Zero xrefs does *not* mean the constant is dead — the getter is virtual, so callers
 reach it through the vtable. Instead xref the singleton pointer (`ISysInitCstm::spCstm`)
