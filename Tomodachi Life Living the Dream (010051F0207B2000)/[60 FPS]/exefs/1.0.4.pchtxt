@@ -1,0 +1,21 @@
+@nsobid-B39FEF373FB12154385D012AAB3BC99EF2944470
+
+# Tomodachi Life: Living the Dream [010051F0207B2000] v1.0.4 - 60FPS
+
+// Unlocks the frame rate to 60 FPS.  The engine computes its frame divisor as
+// 60 / W20 and stores the result; W20 is 2 by default (30 FPS).  This overwrites
+// the instruction right before that divide (LDR W9,[X0,#0x24]) with MOVZ W20,#1,
+// forcing the divisor to 1 so the target becomes 60 FPS.
+
+@flag print_values
+@flag offset_shift 0x100
+
+// 60 FPS
+@enabled
+0027f518 34008052   // MOVZ W20,#1  (was LDR W9,[X0,#0x24]) -> frame divisor 1 = 60 FPS
+@stop
+
+// 60 FPS mechanism by Fl4sh9174 (https://github.com/Fl4sh9174); ported to 1.0.4
+// by re-deriving the site in main.i64 (framerate calc sub_710027F474).
+//
+// https://github.com/RAMDRAGONS/switch-visuen-mods

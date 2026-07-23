@@ -1,0 +1,57 @@
+@nsobid-B39FEF373FB12154385D012AAB3BC99EF2944470
+
+# Tomodachi Life: Living the Dream [010051F0207B2000] v1.0.4 - Supersampling 1440p
+
+// SUPERSAMPLING, not an output-resolution change.  This makes the game render
+// its 3D scene internally at 1440p and its composite stage downsamples that
+// back to the console's fixed 1080p output.  The result is a sharper, cleaner
+// 1080p image (1.78x the internal pixels = supersampled anti-aliasing), NOT a
+// 1440p screenshot.  Confirmed by debugging: the game's final composite/output
+// resolution is hardwired to docked-native 1080p inside its async render graph,
+// separate from the render size patched here, and cannot easily be raised from
+// an exefs patch.  (F8 screenshots therefore stay 1920x1080.)
+//
+// It runs on Nintendo's gsys/agl engine.  Patched below: the framework screen
+// size (nnMain), the gsys::SystemTask::CreateArg render-display size, the
+// dynamic-resolution ladder (pinned to 1.0 so load can't drop it), and the GPU
+// pool (fixed 256 MB constant, scaled by the 1.78x pixel ratio -- without
+// this the game aborts, the reason the old 2580x1080 mods warned about crashes).
+// The UI canvas is a separate hardcoded 1280x720, so HUD/menu layout is
+// untouched.  Memory comes from nn::os::SetMemoryHeapSize(available-used), so if
+// you run short raise Ryujinx System > DRAM Size -- 4 GiB recommended here.
+
+@flag print_values
+@flag offset_shift 0x100
+
+@enabled
+// 1. Framework screen size (nnMain): the packed height<<32 | width the
+//    GameFrameworkColony config hands to sead::GameFrameworkNx.
+008df6b0 084081D2   // MOVZ X8, #2560          width
+008df6b4 08B4C0F2   // MOVK X8, #1440,LSL#32   height
+// 2. gsys::SystemTask::CreateArg main render-display size: the internal
+//    3D render resolution.  This is the constant the 1.0.2 mods patch.
+008b736c 094081D2   // MOVZ X9, #2560          width
+008b7374 09B4C0F2   // MOVK X9, #1440,LSL#32   height
+// 3. Dynamic-resolution ladder in the CreateArg constructor.  Both of its
+//    two {x,y} scale sets read 1.0 / 0.8 / 0.667 by default; the 0.8 and
+//    0.667 rungs are rewritten to 1.0 so the controller can never scale
+//    the frame down under load.  Registers X9/X10 are dead here -- both
+//    are reloaded just above these lines and only consumed by the four
+//    STRs at 008e8974..008e8980 that write the ladder.
+008b76e0 0AF0A7D2   // MOVZ X10,#0x3F80,LSL#16  ; X10 = 1.0f,1.0f
+008b76e4 0AF0E7F2   // MOVK X10,#0x3F80,LSL#48  ;
+008b76f8 09F0A7D2   // MOVZ X9, #0x3F80,LSL#16  ; X9  = 1.0f,1.0f
+008b76fc 09F0E7F2   // MOVK X9, #0x3F80,LSL#48  ;
+008b7704 1F2003D5   // NOP                      ; was MOVK X9, #0xCCCD,LSL#32
+008b7708 1F2003D5   // NOP                      ; was MOVK X9, #0x3F4C,LSL#48
+008b770c 1F2003D5   // NOP                      ; was MOVK X10,#0xAAAB,LSL#32
+008b7710 1F2003D5   // NOP                      ; was MOVK X10,#0x3F2A,LSL#48
+// 4. GPU pool: the fixed 128 MB constant the CreateArg builder stores
+//    into the graphics-system create arg.  Scaled by the pixel ratio.
+008b73c4 0C00A252   // MOVZ W12,#0x1000,LSL#16   = 256 MB (was 128 MB)
+@stop
+
+// Reverse-engineered against main.i64 for 1.0.3; every offset byte-verified.
+// The 1440p figure is the INTERNAL render resolution; output remains 1080p.
+//
+// https://github.com/RAMDRAGONS/switch-visuen-mods

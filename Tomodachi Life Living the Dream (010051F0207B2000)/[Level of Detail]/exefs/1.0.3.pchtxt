@@ -1,0 +1,24 @@
+@nsobid-6291E14453EE63090164E79B227113F0C24B0CB7
+
+# Tomodachi Life: Living the Dream [010051F0207B2000] v1.0.3 - Lodbias
+
+// Forces the texture sampler mip-LOD bias to -1.0 (one full mip level
+// sharper than the distance-based default) and the max anisotropy to 16x.
+// Both sites sit in the nn::gfx sampler Initialize, so this applies to
+// every sampler the game creates.  Independent of resolution -- it can be
+// installed alongside any of the resolution mods, no offsets overlap.
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Level of Detail
+
+@enabled
+001d420c 00103E1E   // FMOV S0, #-1.0   (was LDR S0,[X20,#0x18] = SamplerInfo.lodBias)
+001d4268 0010261E   // FMOV S0, #16.0   (was UCVTF S0,S0 on SamplerInfo.maxAnisotropy)
+@stop
+
+// Ported to 1.0.3 from Fl4sh9174's 1.0.0-1.0.2 mods; both sites re-derived
+// in main.i64 for this build and byte-verified, not offset-guessed.
+//
+// https://github.com/RAMDRAGONS/switch-visuen-mods

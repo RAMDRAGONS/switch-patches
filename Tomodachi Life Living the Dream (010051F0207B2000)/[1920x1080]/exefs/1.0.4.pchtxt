@@ -1,0 +1,45 @@
+@nsobid-B39FEF373FB12154385D012AAB3BC99EF2944470
+
+# Tomodachi Life: Living the Dream [010051F0207B2000] v1.0.4 - 1080p Native (no dynamic resolution)
+
+// Pins the game at a full native 1920x1080 and disables its dynamic-resolution
+// ladder, so the image never drops below native under load.  This is the game's
+// native output resolution (its composite/output stage is hardwired to 1080p),
+// so this mod does not raise the screenshot size -- it just holds native 1080p
+// steady.  For a sharper image use the [Supersampling 1440p] / [Supersampling
+// 2160p] mods, which render higher internally and downsample to this same 1080p.
+//
+// Native res needs no GPU-pool enlargement, so nothing here risks the
+// above-native crash the old 2580x1080 mods warned about.
+
+@flag print_values
+@flag offset_shift 0x100
+
+@enabled
+// 1. Framework screen size (nnMain): the packed height<<32 | width the
+//    GameFrameworkColony config hands to sead::GameFrameworkNx.
+008df6b0 08F080D2   // MOVZ X8, #1920          width
+008df6b4 0887C0F2   // MOVK X8, #1080,LSL#32   height
+// 2. gsys::SystemTask::CreateArg main render-display size: the internal
+//    3D render resolution.  This is the constant the 1.0.2 mods patch.
+008b736c 09F080D2   // MOVZ X9, #1920          width
+008b7374 0987C0F2   // MOVK X9, #1080,LSL#32   height
+// 3. Dynamic-resolution ladder in the CreateArg constructor.  Both of its
+//    two {x,y} scale sets read 1.0 / 0.8 / 0.667 by default; the 0.8 and
+//    0.667 rungs are rewritten to 1.0 so the controller can never scale
+//    the frame down under load.  Registers X9/X10 are dead here -- both
+//    are reloaded just above these lines and only consumed by the four
+//    STRs at 008e8974..008e8980 that write the ladder.
+008b76e0 0AF0A7D2   // MOVZ X10,#0x3F80,LSL#16  ; X10 = 1.0f,1.0f
+008b76e4 0AF0E7F2   // MOVK X10,#0x3F80,LSL#48  ;
+008b76f8 09F0A7D2   // MOVZ X9, #0x3F80,LSL#16  ; X9  = 1.0f,1.0f
+008b76fc 09F0E7F2   // MOVK X9, #0x3F80,LSL#48  ;
+008b7704 1F2003D5   // NOP                      ; was MOVK X9, #0xCCCD,LSL#32
+008b7708 1F2003D5   // NOP                      ; was MOVK X9, #0x3F4C,LSL#48
+008b770c 1F2003D5   // NOP                      ; was MOVK X10,#0xAAAB,LSL#32
+008b7710 1F2003D5   // NOP                      ; was MOVK X10,#0x3F2A,LSL#48
+@stop
+
+// Reverse-engineered against main.i64 for 1.0.3; every offset byte-verified.
+//
+// https://github.com/RAMDRAGONS/switch-visuen-mods
