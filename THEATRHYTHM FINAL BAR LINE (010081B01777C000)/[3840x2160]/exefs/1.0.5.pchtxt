@@ -1,0 +1,76 @@
+@nsobid-5CC7A76ED820CF4C45AA7B935C79307F
+
+# THEATRHYTHM FINAL BAR LINE 1.0.5 - 3840x2160 resolution
+
+// Theatrhythm Final Bar Line is a Unity title and renders at a native
+// 1920x1080 when docked (1280x720 handheld).  Raising that takes three
+// separate changes, all of which are in this file:
+//
+//   1. the resolution ScreenManagerNX hands to Screen.width/Screen.height
+//      and to the NVN window crop,
+//   2. the min(w,1920)/min(h,1080) ceiling inside RequestResolution, which
+//      would otherwise clamp (1) straight back down to 1080p,
+//   3. the fixed 1920x1080 the player allocates its back-buffer textures
+//      and backbuffer RenderSurface at.  The NX player always allocates a
+//      full 1080p surface and renders into a sub-rect of it, so without
+//      this the frame is still rendered at 1080p no matter what (1) says.
+//
+// The back-buffer memory pool is sized from the texture storage sizes at
+// runtime, so it grows with this patch on its own -- there is no fixed pool
+// constant to enlarge.  Unity's own heap is taken from nn::os::QueryMemoryInfo
+// at startup, so it scales with the emulator's DRAM Size setting too.
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces the render and scan-out resolution to 3840x2160
+// (4.00x the pixels of the native 1920x1080).
+
+@enabled
+// 1. ScreenManagerNX: the docked/handheld resolution pair, at every site
+//    that picks one (initial setup x2, operation-mode change,
+//    performance-mode change).  Both halves of each pair are set to the
+//    target, so the resolution no longer depends on dock state.
+01314F1C 150E8152
+01314F20 16E08152
+01314F64 08E08152
+01314F6C 080E8152
+01314F80 08E08152
+01314F88 080E8152
+01315F28 160E8152
+01315F2C 17E08152
+01315F70 08E08152
+01315F78 080E8152
+01315F8C 08E08152
+01315F94 080E8152
+01260E18 08E08152
+01260E1C 09E08152
+01260E24 080E8152
+01260E28 090E8152
+01260E5C 08E08152
+01260E60 09E08152
+01260E68 080E8152
+01260E6C 090E8152
+// 2. ScreenManagerNX::RequestResolution ceiling (min with 1920x1080).
+//    Raised so the values above survive; the surrounding compares are
+//    untouched, so the clamp still behaves as a min() for any input.
+012612CC 08E08152
+012612DC 080E8152
+// 3. The fixed 1080p allocations: the backbuffer RenderSurface and the
+//    three NVN back-buffer textures plus the depth buffer (~127 MB total
+//    at this resolution, against ~33 MB stock).  This is the change that
+//    actually raises the internal render resolution rather than just
+//    stretching a 1080p image.
+01315FC8 030E8152
+01315FD0 02E08152
+0132FFE4 190E8152
+0132FFEC 01E08152
+01330088 01E08152
+01330248 020E8152
+01330250 01E08152
+@stop
+
+// Reverse-engineered against the Unity NX player in main (build id above).
+// Every offset here was located by signature and byte-verified.
+//
+// https://github.com/RAMDRAGONS/switch-visuen-mods

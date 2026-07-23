@@ -18,8 +18,9 @@ any title that stores its output resolution as a packed 64-bit `width|height`
 constant.
 
 Sibling skills, each its own mod folder: `switch-lod-bias-pchtxt` (texture LOD
-bias) and `switch-shadow-resolution-pchtxt` (shadow-map size — it draws from the
-same GPU pool as §2b, so read them together).
+bias), `switch-shadow-resolution-pchtxt` (shadow-map size — it draws from the
+same GPU pool as §2b, so read them together) and `switch-framerate-pchtxt`
+(frame pacing — pairing it with a resolution mod multiplies the GPU cost).
 
 Deliver patches as pchtxt only. Never modify the game dump. Open IDBs **in place**
 (no copies).
@@ -131,6 +132,54 @@ address) must be a **MOVZ** (it clears the whole register); the second must be a
 
 Replacing `ORR` with `MOVZ` is fine and often required (many widths — e.g. 2560 =
 0xA00 — are not encodable as an ORR bitmask immediate).
+
+## 1b. Unity NX titles: three constants, and a `min()` between them
+
+Unity games are a large share of Switch titles and do **not** use a packed WxH
+constant at all — the width and height are separate `MOVZ Wd,#imm` immediates,
+repeated at many sites. Recognise the engine from `nn::vi::CreateLayer` +
+`nn::oe::GetOperationMode` in one function, `il2cpp` resolver strings
+(`sub_X("UnityEngine.Screen::get_width()")`), and a `"Back-Buffers MemoryPool"`
+string. Three groups must be patched together:
+
+1. **`ScreenManagerNX` resolution selection** — what becomes `Screen.width` /
+   `Screen.height` and the NVN window crop. The shape is always
+   `MOVZ Wd,#1280 / MOVZ Wd,#1920 / CSEL` (and 720/1080), gated on
+   `GetOperationMode()==1` (docked) and/or `GetPerformanceMode()==1`. There are
+   several copies: two in the graphics-init function (selected by a
+   resolution-policy global — `CMP W8,#3 / #2 / #1`) and one per notification
+   handler (operation-mode changed, performance-mode changed). **Rewrite both
+   halves of every pair**, docked *and* handheld: the mod then holds regardless
+   of dock state and regardless of which policy branch runs.
+2. **`RequestResolution`'s ceiling** — `a1[48]=min(w,1920); a1[49]=min(h,1080)`,
+   emitted as `CMP Wn,#0x780 / MOV W8,#0x780 / CSEL W8,Wn,W8,LT`. Patch **only
+   the `MOV`** that supplies the ceiling. Leaving the `CMP` at 1920 keeps the
+   expression a correct `min()` for every input (`w >= 1920` → the new ceiling,
+   `w < 1920` → `w`); patching both would need a re-encoded `CMP` for no gain.
+3. **The fixed 1080p allocations.** This is the one that is easy to miss and the
+   reason group 1 alone produces a stretched image. The NX player always
+   allocates a full 1920x1080 backbuffer `RenderSurface` and 1080p NVN
+   back-buffer textures, then renders into a **sub-rect** of them — so the
+   allocation caps the true render resolution. Look for a `SetSize2D(1920,1080)`
+   on an `nvnTextureBuilder` (typically **three** call sites: colour-storage
+   sizing, depth-storage sizing, and the real texture init) plus the
+   `CreateRenderSurface`-style vtable call taking `W2=1920, W3=1080`. Watch for
+   a shared height register (`MOVZ W25,#0x438` reused via `MOV W2,W25` across two
+   builder calls) — verify it is dead before its next assignment.
+
+Memory is usually a non-issue here: the back-buffer pool is sized from
+`GetStorageSize` **after** `SetSize2D`, so it grows by itself, and Unity's heap
+comes from `nn::os::QueryMemoryInfo` in `nninitStartup` (all remaining memory),
+so it follows the emulator's DRAM Size. There is no fixed pool constant to
+enlarge — unlike §2b. Budget ≈ `w*h*4*4` bytes for the three colour buffers plus
+depth (33 MB at 1080p, 127 MB at 4K).
+
+Two things Unity gives you for free: `Screen.width/height` propagate to
+`CanvasScaler`, so the UI scales without a canvas pin (§2c), and there is no
+dynamic-resolution ladder (§2d) unless the game itself calls
+`Screen.SetResolution` — check by xrefing the
+`"UnityEngine.Screen::SetResolution"` resolver string; a reference only from the
+icall registration table means the game never calls it.
 
 ## 2b. Fixed GPU pools must scale with resolution (or the game aborts)
 
