@@ -1,0 +1,24 @@
+@nsobid-FA3897E0FADDD49C69ED00F23E705B3E
+
+# Splatoon 2 1.1.0 QA Build 2 - Disable FXAA
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Disables the FXAA post-process anti-aliasing pass in agl::pfx::FilterAA::draw.
+// The filter dispatches on its antialias_type field (this+0x428): 0 = FXAA,
+// 1 = ReduceAA, 2 = SMAA. This redirects only the FXAA case (type 0) to the plain
+// pass-through copy (agl::utl::ImageFilter2D::drawTexture), so the frame is presented
+// unfiltered instead of FXAA-blurred. ReduceAA/SMAA are left intact if ever selected.
+//
+// Patch: the CBNZ that guards the FXAA fall-through is turned into an unconditional
+// branch to the pass-through path.
+
+@enabled
+018B583C 0C000014   // B (pass-through)   (was CBNZ W8, <post-draw>)
+@stop
+
+// Effect reverse-engineered against the agl/gsys engine using this symbol-bearing
+// QA build; the same fix is applied to retail 5.5.2 by signature.
+//
+// https://github.com/RAMDRAGONS/switch-visuen-mods

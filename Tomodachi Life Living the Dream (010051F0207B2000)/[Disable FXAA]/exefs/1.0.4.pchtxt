@@ -1,0 +1,24 @@
+@nsobid-B39FEF373FB12154385D012AAB3BC99EF2944470
+
+# Tomodachi Life: Living the Dream [010051F0207B2000] v1.0.4 - Disable FXAA
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Disables the FXAA post-process anti-aliasing pass in agl::pfx::FilterAA::draw.
+// The filter dispatches on its antialias_type field (this+0x748): 0 = FXAA,
+// 1 = ReduceAA, 2 = SMAA. This redirects only the FXAA case (type 0) to the plain
+// pass-through copy, so the frame is presented unfiltered instead of FXAA-blurred.
+// ReduceAA/SMAA are left intact if ever selected.
+//
+// Patch: the first instruction of the FXAA jump-table case is replaced with a
+// branch back to the filter's disabled/pass-through path.
+
+@enabled
+021A3E70 DCFFFF17   // B (pass-through)   (was MOV X0, X21 = FXAA case entry)
+@stop
+
+// Same agl/gsys FilterAA as Splatoon 2; the constructor and draw dispatch were
+// re-derived in main.i64 for this build and byte-verified, not offset-guessed.
+//
+// https://github.com/RAMDRAGONS/switch-visuen-mods
