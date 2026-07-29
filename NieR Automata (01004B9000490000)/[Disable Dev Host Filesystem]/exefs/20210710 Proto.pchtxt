@@ -1,0 +1,36 @@
+@nsobid-F2556B609F1E4E343C05E6892A063DF192BD95D7
+
+# NieR:Automata July 10 2021 prototype - Disable dev host filesystem
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Stops the build from reading development assets off PlatinumGames' internal
+// file server, which it otherwise does before it can reach the title screen.
+//
+// Hw/Os/Device/Platforms/Switch/HwOsSystemDeviceImpl.cpp InitializeFileSystem
+// picks exactly one file source: with the "-nrom" command line argument it calls
+// nn::fs::MountHostRoot(), otherwise it calls nn::fs::MountRom("rom") and returns
+// without ever mounting the host. Launched from the packaged NSP there is no
+// argument region, so "rom" is mounted and "@Host" is not.
+//
+// Hw/Debug/FileSystem/Platforms/Switch/HwDebugFileSystemImplDev.cpp is still
+// compiled in and enabled, and every one of its entry points hands nn::fs a UNC
+// path like "//svprj028/PRJ_028/p2/soft/document/HashList/HashList.bxm". Those
+// resolve to the host root mount name, which does not exist here, so the very
+// first probe returns nn::fs::ResultNotMounted (2002-6905). ReadAlloc only
+// tolerates ResultPathNotFound, so nn::fs::GetEntryType aborts the process.
+//
+// Patch: the master switch those entry points test first is forced off. Each one
+// then short-circuits to its "file is not present" answer without touching nn::fs
+// at all, and the game falls back to the packaged data in rom:/ - which is the
+// same thing it would do on a dev kit whose host share was unreachable.
+
+@enabled
+019CF318 00000000   // Hw debug filesystem enable flag: 1 -> 0
+@stop
+
+// The flag lives in .data and is only ever read, so there is no in-game way to
+// turn it off; it is a build-time switch left on in this prototype.
+//
+// https://github.com/RAMDRAGONS/switch-patches
