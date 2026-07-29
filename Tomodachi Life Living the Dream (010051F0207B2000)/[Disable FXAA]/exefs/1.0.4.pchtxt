@@ -21,4 +21,4 @@
 // Same agl/gsys FilterAA as Splatoon 2; the constructor and draw dispatch were
 // re-derived in main.i64 for this build and byte-verified, not offset-guessed.
 //
-// https://github.com/RAMDRAGONS/switch-visuen-mods
+// https://github.com/RAMDRAGONS/switch-patches

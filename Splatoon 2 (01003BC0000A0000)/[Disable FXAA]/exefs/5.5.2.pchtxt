@@ -22,4 +22,4 @@
 // FilterAA constructor; the draw dispatch was matched against the symbol-bearing
 // 1.1.0 QA build. Retail 5.5.2 is symbol-stripped -- the site was byte-verified.
 //
-// https://github.com/RAMDRAGONS/switch-visuen-mods
+// https://github.com/RAMDRAGONS/switch-patches

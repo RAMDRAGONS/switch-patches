@@ -30,4 +30,4 @@
 // Shadow-map sizing reverse-engineered against the gsys/agl engine
 // (gsys::ModelSceneShadow::drawDepthShadow -> agl::sdw::ShadowMap::setSize).
 //
-// https://github.com/RAMDRAGONS/switch-visuen-mods
+// https://github.com/RAMDRAGONS/switch-patches

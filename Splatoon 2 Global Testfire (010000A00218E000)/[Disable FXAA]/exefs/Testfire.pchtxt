@@ -21,4 +21,4 @@
 // Effect reverse-engineered against the agl/gsys engine; this symbol-bearing build
 // names agl::pfx::FilterAA::draw directly. Same fix as the retail 5.5.2 / QA mods.
 //
-// https://github.com/RAMDRAGONS/switch-visuen-mods
+// https://github.com/RAMDRAGONS/switch-patches

@@ -42,4 +42,4 @@
 // Dev-build offsets reverse-engineered against the Cstm/Lp engine
 // (Lp::Sys::ISysInitCstm::getScanBufferSize / nn::gfx SamplerImpl::Initialize).
 //
-// https://github.com/RAMDRAGONS/switch-visuen-mods
+// https://github.com/RAMDRAGONS/switch-patches

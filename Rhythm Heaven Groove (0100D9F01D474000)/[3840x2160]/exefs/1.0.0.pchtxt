@@ -47,4 +47,4 @@
 // Reverse-engineered against the game's own renderer, with the frame
 // structure confirmed by RenderDoc capture.  Every offset byte-verified.
 //
-// https://github.com/RAMDRAGONS/switch-visuen-mods
+// https://github.com/RAMDRAGONS/switch-patches

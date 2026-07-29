@@ -54,4 +54,4 @@
 // Reverse-engineered against main.i64 for 1.0.3; every offset byte-verified.
 // The 2160p (4K) figure is the INTERNAL render resolution; output remains 1080p.
 //
-// https://github.com/RAMDRAGONS/switch-visuen-mods
+// https://github.com/RAMDRAGONS/switch-patches

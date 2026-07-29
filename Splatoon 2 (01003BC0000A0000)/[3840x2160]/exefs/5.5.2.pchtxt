@@ -45,4 +45,4 @@
 // Remaining offsets reverse-engineered against the Cstm/Lp + gsys/agl engine; 5.5.2
 // is symbol-stripped, so every site here was matched by signature and byte-verified.
 //
-// https://github.com/RAMDRAGONS/switch-visuen-mods
+// https://github.com/RAMDRAGONS/switch-patches
