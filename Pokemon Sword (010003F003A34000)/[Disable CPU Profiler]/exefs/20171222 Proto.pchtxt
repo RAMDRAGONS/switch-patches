@@ -1,0 +1,40 @@
+@nsobid-EBF7275992BFF941822D5F46E8B89F50
+
+# Pokemon Sword December 22 2017 prototype - Disable NX CPU Profiler
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Skips nn::profiler::detail::Initialize in gfl::framework::Application::Application.
+//
+// This build is compiled with NN_PROFILER_USE_EXTERNAL_PROCESS, so the profiler
+// library talks to the devkit's "banana" sysmodule over HIPC instead of driving
+// PCCOM in-process (which is what the later March 2018 "sword" build does). That
+// sysmodule only exists on a devkit with the NX CPU Profiler tool installed, and
+// every step of the handshake is fatal on failure:
+//
+//   nn::profiler::CreateProfilerByHipc  -> NN_ABORT_UNLESS_RESULT_SUCCESS
+//   nn::profiler::LibraryInitialize     -> NN_ABORT_UNLESS_RESULT_SUCCESS
+//   IProfiler::GetSystemEvent           -> NN_ABORT_UNLESS_RESULT_SUCCESS
+//
+// so there is no graceful degradation path to reach - the library cannot be told
+// "no profiler here". Under an emulator sm has no "banana" to hand out and the
+// process dies during Application construction, before nnMain gets going.
+//
+// The call site discards the nn::Result (the next instruction is an argument-less
+// BL nn::oe::Initialize), and every recording path in the library is gated behind
+// GetProfilerStatus() != ProfilerStatus_Offline, whose backing static is already 0
+// (Offline). nn::profiler::Finalize() and Cleanup() are both gated the same way, so
+// nothing later reaches into the uninitialised subsystem. Removing the call is
+// therefore inert apart from leaving the 64 MB profiler buffer that the constructor
+// allocated just above unused.
+
+@enabled
+0005C960 1F2003D5   // BL nn::profiler::detail::Initialize -> NOP
+@stop
+
+// Reverse-engineered against beluga.nss (gflib3 / Jenkins job "orion",
+// bld_rev 30f225a1cb089f9b2e2f93b596e7b66a9dca8bf8, build 20171222164419)
+// and the nn::profiler library sources.
+//
+// https://github.com/RAMDRAGONS/switch-patches
