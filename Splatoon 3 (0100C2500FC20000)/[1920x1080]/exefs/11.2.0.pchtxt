@@ -1,0 +1,51 @@
+@nsobid-6830B3A12406CB4716FEC5ADDC35D3E2DC92D212
+
+# Splatoon 3 11.2.0 - 1920x1080 resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Pins the game at 1920x1080 -- the resolution it already targets when docked.
+//
+// This is NOT a supersampling mod. It renders no more pixels than stock, costs
+// no extra memory, and needs no DRAM Size change and no GPU-pool or heap patch;
+// the stock 128 MB dynamic-texture pool is already sized for 1080p. The sead
+// physical framebuffer is left alone for the same reason -- it is 1920x1080
+// already.
+//
+// What it does is defeat dynamic resolution. Under load Splatoon 3 drops the
+// render size down a built-in ladder (180, 360, 420, 480, 540, 600, 720, 900,
+// 1080, 1440, 2160) and crops the presented image to match. This forces the
+// ladder entry, the crop and the controller's full-resolution flag to 1080p, so
+// the game holds full resolution instead of dipping.
+//
+// Use DOCKED mode (System > "Enable Docked Mode"); handheld sizes are stock.
+
+@enabled
+// Make the dynamic-resolution controller's apply path run on the first frame
+// and publish this size to gfxstate+0x388, the field render targets are sized
+// from. It normally fires only on an operation-mode change, which never happens
+// when you boot straight into docked mode.
+013638AC 08008052   // MOVZ W8,#0     (ctrl+0x320 cached op mode; was 1)
+01363AE0 09878052   // MOVZ W9,#1080  (was ladder[idx])
+01363B34 0AF08052   // MOVZ W10,#1920 (was FCVTZS W10,S0 = height/9*16)
+// Drop that path's display-buffer crop write -- the display buffer does not
+// exist yet on frame 1. The per-frame path below repeats it behind a null guard.
+01363B44 1F2003D5   // NOP (was LDR  X11,[X11,#0x50]  = display buffer)
+01363B48 1F2003D5   // NOP (was STRB W12,[X11,#0x52]  = crop dirty)
+01363B4C 1F2003D5   // NOP (was STUR XZR,[X11,#0x54]  = crop x,y)
+01363B50 1F2003D5   // NOP (was STP  W10,W9,[X11,#0x5C] = crop w,h)
+// Force the controller's full-resolution flag (ctrl+0x31C) at both read sites,
+// bypassing its per-frame min(ladder/height, 1.0) shrink.
+01363B54 29008052   // MOVZ W9,#1
+01363C08 2C008052   // MOVZ W12,#1
+// Pin the two loads that feed nvnWindowSetCrop to the same size.
+01363BFC 0AF08052   // MOVZ W10,#1920 (was LDR W10,[X11,#0x388])
+01363C04 09878052   // MOVZ W9,#1080  (was LDR W9,[X11,#0x38C])
+@stop
+
+// Offsets reverse-engineered against Splatoon 3's sead + spl::gfx + agl/gsys
+// engine; 11.2.0 retail is symbol-stripped, so every site was located by
+// structure and byte-verified against the IDB.
+//
+// https://github.com/RAMDRAGONS/switch-patches

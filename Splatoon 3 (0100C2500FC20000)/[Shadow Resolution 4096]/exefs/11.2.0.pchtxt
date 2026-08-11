@@ -1,0 +1,43 @@
+@nsobid-6830B3A12406CB4716FEC5ADDC35D3E2DC92D212
+
+# Splatoon 3 11.2.0 - 4096x4096 shadow resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces the dynamic sun/cascade depth-shadow map to 4096x4096.
+//
+// Splatoon 3 has no hardcoded shadow constant -- the size is the per-stage env
+// parameter DynamicShadowMapSize, so patching a constructor default would do
+// nothing. Every frame the shadow prepass (sub_7104758D70) instead reads the
+// configured width/height out of the shadow config (+0x1A8 / +0x1AC), scales
+// them by the viewport ratio and CLAMPS THE SCALE AT 1.0:
+//
+//     scale = min(1.0, max(viewW/refW, viewH/refH));   // refs at cfg+5568/+5600
+//     w = max(32, (int)(cfgW * scale));  w = (w + 7) & ~7;
+//     h = max(32, (int)(cfgH * scale));  h = (h + 7) & ~7;
+//     shadowmap.width = w;  shadowmap.height = h;      // +0x3E8 / +0x408
+//
+// Because the scale can only ever shrink the map, raising the render
+// resolution on its own leaves shadows exactly as they were. These two lines
+// replace the FCVTZS that produce w and h with immediates, so the size is
+// pinned to a fixed number regardless of what the stage's env archive sets.
+// The following max(.,32) and 8-pixel alignment both leave 4096 untouched, and
+// the now-dead FMUL/SCVTF above are harmless.
+//
+// Pair this with one of the [WxH] resolution mods -- they own the three pool
+// offsets and enlarge it to 256/512/768 MB. Do NOT add those offsets here as
+// well; two enabled mods writing the same offset is order-dependent. If it
+// still faults inside the allocator, step down to Shadow Resolution 2048 or up
+// a resolution tier.
+
+@enabled
+04758F10 09008252   // MOVZ W9,#4096    (was FCVTZS W9,S1 -- scaled shadow width)
+04758F30 0A008252   // MOVZ W10,#4096   (was FCVTZS W10,S0 -- scaled shadow height)
+@stop
+
+// Offsets reverse-engineered against Splatoon 3's sead + Cmn/spl::gfx + agl/gsys
+// engine. 11.2.0 retail is symbol-stripped -- every site above was located by
+// structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

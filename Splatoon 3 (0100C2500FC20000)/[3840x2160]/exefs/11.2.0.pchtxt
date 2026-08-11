@@ -1,0 +1,67 @@
+@nsobid-6830B3A12406CB4716FEC5ADDC35D3E2DC92D212
+
+# Splatoon 3 11.2.0 - 3840x2160 resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Renders at 3840x2160 instead of the stock docked 1080p.
+//
+// Three sizes have to move together: the sead physical framebuffer (the NVN
+// window texture, which sets the ceiling), the render size at gfxstate+0x388
+// (what the render targets are actually allocated at), and the crop rectangle
+// handed to nvnWindowSetCrop. Move only the first and you get a 3840x2160
+// window showing an upscaled 1080p image.
+//
+// REQUIRES Ryujinx > System > DRAM Size set to 8 GiB or 12 GiB. The agl
+// dynamic-texture pool is a fixed 128 MB that does not scale with resolution,
+// so it is raised to 768 MB here -- which overshoots a budget the engine
+// asserts on, so that assertion is bypassed too.
+//
+// Use DOCKED mode (System > "Enable Docked Mode"); handheld sizes are stock.
+
+@enabled
+// sead physical framebuffer / NVN window textures, built as two immediates in
+// nnMain's sead::GameFrameworkNx::CreateArg.
+0442EAF4 0A0E8152   // MOVZ W10,#2160        (was 1080)
+0442EB1C 08E0C1F2   // MOVK X8,#3840,LSL#32  (was 1920)
+// Make the dynamic-resolution controller's apply path run on the first frame
+// and publish this size to gfxstate+0x388, the field render targets are sized
+// from. It normally fires only on an operation-mode change, which never happens
+// when you boot straight into docked mode.
+013638AC 08008052   // MOVZ W8,#0     (ctrl+0x320 cached op mode; was 1)
+01363AE0 090E8152   // MOVZ W9,#2160  (was ladder[idx])
+01363B34 0AE08152   // MOVZ W10,#3840 (was FCVTZS W10,S0 = height/9*16)
+// Drop that path's display-buffer crop write -- the display buffer does not
+// exist yet on frame 1. The per-frame path below repeats it behind a null guard.
+01363B44 1F2003D5   // NOP (was LDR  X11,[X11,#0x50]  = display buffer)
+01363B48 1F2003D5   // NOP (was STRB W12,[X11,#0x52]  = crop dirty)
+01363B4C 1F2003D5   // NOP (was STUR XZR,[X11,#0x54]  = crop x,y)
+01363B50 1F2003D5   // NOP (was STP  W10,W9,[X11,#0x5C] = crop w,h)
+// Force the controller's full-resolution flag (ctrl+0x31C) at both read sites,
+// bypassing its per-frame min(ladder/height, 1.0) shrink.
+01363B54 29008052   // MOVZ W9,#1
+01363C08 2C008052   // MOVZ W12,#1
+// Pin the two loads that feed nvnWindowSetCrop to the same size.
+01363BFC 0AE08152   // MOVZ W10,#3840 (was LDR W10,[X11,#0x388])
+01363C04 090E8152   // MOVZ W9,#2160  (was LDR W9,[X11,#0x38C])
+// Enlarge the fixed agl dynamic-texture pool to 768 MB. sub_710135AE88 looks
+// it up by name and falls back to a hardcoded 128 MB; both arms of the CSEL need
+// patching, since the config value wins when present. This mod OWNS these four
+// offsets -- do not duplicate them in another enabled mod.
+0135AF04 0900A652   // MOVZ W9,#0x3000,LSL#16  (config value)
+0135AF0C 0800A652   // MOVZ W8,#0x3000,LSL#16  (default; was 0x800 = 128 MB)
+0135AF4C 1500A652   // MOVZ W21,#0x3000,LSL#16 (null-config fallback)
+0135AF58 1500A652   // MOVZ W21,#0x3000,LSL#16 (null-config fallback)
+// sead's heap arrangement halts if a heap exceeds its planned budget -- but it
+// checks AFTER creating the heap, so the memory was obtained successfully and
+// this is only bookkeeping. Redirect the halt past the check; it cannot be NOPed
+// because the halt is noreturn and the next word is the following function.
+04DA16B0 EAFFFF17   // B loc_7104DA1658 (was BL sub_7104521E30 = halt)
+@stop
+
+// Offsets reverse-engineered against Splatoon 3's sead + spl::gfx + agl/gsys
+// engine; 11.2.0 retail is symbol-stripped, so every site was located by
+// structure and byte-verified against the IDB.
+//
+// https://github.com/RAMDRAGONS/switch-patches

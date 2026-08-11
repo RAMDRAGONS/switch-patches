@@ -3,7 +3,8 @@ name: switch-resolution-pchtxt
 description: >-
   Author Nintendo Switch render-resolution exefs pchtxt mods by reverse-engineering
   the game's packed scan-buffer size constant in IDA, plus the GPU pools, heap
-  partitions, UI canvas and dynamic-resolution clamp that must be patched with it.
+  partitions and budget asserts, UI canvas, and the dynamic-resolution controller —
+  which on some engines is the only thing that writes the render size at all.
   Use when asked to make a "1920x1080 / 1440p / 4K resolution mod", an
   "anti-dynamic-resolution" pin, or any pchtxt that rewrites a packed WxH constant
   for a Switch title (Ryujinx / Atmosphere).
@@ -13,9 +14,16 @@ description: >-
 
 This skill captures the end-to-end method for producing render-resolution patches
 as **exefs pchtxt** (IPSwitch) mods. It was derived working on the Splatoon 2 /
-Blitz (Cstm/Lp + gsys/agl + nn::gfx NVN) engine, but the technique generalizes to
-any title that stores its output resolution as a packed 64-bit `width|height`
-constant.
+Blitz (Cstm/Lp + gsys/agl + nn::gfx NVN) engine and extended on Splatoon 3 /
+Thunder (sead `GameFrameworkNx` + spl::gfx + agl/gsys), but the technique
+generalizes to any title that stores its output resolution as a packed 64-bit
+`width|height` constant.
+
+**The single most useful framing:** a modern engine has *three* resolutions, not
+one — the **window/scan-out** texture size, the **render** size the 3D scene is
+drawn at, and the **crop** rectangle that says how much of the window is valid.
+They live in different places and are written by different code. Find all three
+before patching anything; §1 and §2d are both about telling them apart.
 
 Sibling skills, each its own mod folder: `switch-lod-bias-pchtxt` (texture LOD
 bias), `switch-shadow-resolution-pchtxt` (shadow-map size — it draws from the
@@ -99,11 +107,25 @@ constructor (`gsys::SystemTask::CreateArg::CreateArg`) — that build's
 `getGsysCreateArg` never writes a size. Later builds copy the scan buffer into that
 create-arg field, so one constant covers both; older ones need **both patched**.
 
-The two failure modes are diagnostic, so test with screenshots and read them together:
+The failure modes are diagnostic, so test with screenshots and read them together:
 - screenshot grows, image looks no sharper → you patched the scan-out only (the render
   is still native and being upscaled);
 - screenshot stays native → you patched the render only (a sharp frame resolved back
-  down into a native-size output).
+  down into a native-size output);
+- screenshot grows, the image **fills** it but is soft → the window texture and the
+  crop are both at your target and only the render size is still native. This is
+  the trickiest one because everything *looks* wired up. Distinguish it from the
+  first case by forcing the crop to the full window: if the image goes from
+  "small in a corner" to "fills but blurry", you have confirmed the window is
+  large and the render size is a **third, separate field** you have not found yet
+  (§2d).
+
+**Anchor for finding where the render size is consumed:** the render-target
+allocator usually names its buffers. In gsys, one function allocates both
+`"gsys::RenderBuffer::depth"` and `"gsys::RenderBuffer::color"` from the dynamic
+texture allocator, sized from a viewport float pair it was handed. String-xref
+those two literals, decompile the single caller, and walk backwards from the
+width/height arguments — that path terminates at the true render-size field.
 
 **Engines that already separate pixels from layout are the easy case.** Look at the
 render-target constructor: if it stores a *base pixel size* (ints) **and** a
@@ -228,6 +250,37 @@ Find these sizers by symbol (`get...MemSize`) or by xref from the gsys/create-ar
 builder. Expect **more than one** pool; fix them iteratively as new
 `...Allocator::alloc_`/`HaltWithDetail` aborts appear in the log.
 
+**The CSEL trap: a config lookup silently beats the constant you patched.** Newer
+builds do not return the pool size from a leaf — they look it up **by name** from
+a dev-config archive and fall back to the constant only when the lookup misses:
+
+```
+BL   <lookupParam>              ; ("DynamicTextureAllocatorMem", &out)
+LDRB W8, [SP,#found]
+CMP  W8, #0
+LDR  W9, [SP,#value]            ; <- config-supplied value
+MOV  W8, #0x8000000             ; <- the hardcoded 128 MB default
+CSEL X21, X8, X9, EQ            ; EQ (not found) -> default, else the config value
+```
+
+It is natural to assume retail ships no dev config and patch only the `MOV`. On
+Splatoon 3 the lookup *succeeds*, so `W9` won and the patched constant was dead
+code — the mod applied cleanly, the log confirmed every byte, and nothing changed.
+That false negative then poisons the whole investigation: it looks like proof the
+pool is not the bottleneck, and sends you off patching things that were fine.
+
+**Rule: whenever a value reaches its destination through a `CSEL`, patch every
+arm, not the one you believe is live.** Here that means the config load
+(`LDR W9,[SP,#..]` → `MOVZ W9,#imm,LSL#16`), the default `MOV`, **and** the
+early-out fallbacks on the paths where the config object itself is null (the same
+constant typically appears 3–4 times in one function). Cheap insurance: patching
+an arm that never executes costs nothing, and it makes the mod independent of
+whether a config happens to be present.
+
+More generally, whenever a resolution patch "applies but does nothing", suspect
+that the value you changed is not the one being read — before concluding the
+mechanism is wrong.
+
 **The cascade continues one level up — the parent heap partition.** Enlarging a
 pool isn't enough if the pool is carved from a fixed heap partition also sized for
 native res. In Blitz the dynamic-texture pool is carved from the **graphics heap**
@@ -265,6 +318,41 @@ Enlarging any partition is cheap when the arrangement ends with a
 **"take the rest" heap** (Blitz: a final `ExpHeap::create(0, "cOthers", root)`),
 because the extra bytes come out of that slack rather than out of another
 subsystem. Confirm that shape before being generous.
+
+**Not every heap failure is a failure — some are assertions you can delete.** sead's
+heap-arrangement pass keeps a per-slot **budget table** and checks each heap
+against it *after* creating it:
+
+```c
+heap = create(...);                    // succeeds -- the memory really was obtained
+if (heap) {
+    budget[slot] -= heap->getSize();
+    if (budget[slot] < 0) halt();      // <- planning assertion, not an allocator error
+    if (budget[slot] == 0 && ...) budget[slot] = 1;
+}
+```
+
+Because the create already succeeded, this is bookkeeping against a number the
+developers wrote down in advance — it fires when *you* oversize a pool even though
+the arena has room (which it does, once the emulator DRAM is raised). Tell it apart
+from a real out-of-memory by the log: a genuine failure aborts inside
+`...Allocator::alloc_`/`allocBuffer_` with a size-vs-free message, whereas this one
+is a bare `nn::diag::detail::Abort` reached from the heap-arrangement function with
+no diagnostic string.
+
+Redirect the halt call — **do not NOP it**. `halt()` is `noreturn`, so the compiler
+emitted nothing after it; the next word is the *following function's prologue*, and
+a NOP falls straight into it. Branch instead to the instruction the function would
+have continued at:
+
+```
+B <continue_label>   : 0x14000000 | (((target - PC) >> 2) & 0x03FFFFFF)
+```
+Verify a backward displacement against a `B` already present in the same function
+(read its bytes and confirm your two's complement matches) before shipping it.
+Once the budget has gone negative it stays negative, and the later `if (budget >= 1)`
+guard makes subsequent heaps in that slot skip the accounting entirely rather than
+re-tripping the assert.
 
 **Budget convention:** target the default **4 GiB** DRAM as the baseline — size the
 enlargements so lower resolutions still fit it. Compute the arrangement total
@@ -350,6 +438,64 @@ functions that merely *read* the size (Blitz: `calcForMeasure_`, which prints
 identity/native-resolution pin genuinely useful: it holds the game at full native
 resolution instead of letting it drop under load.
 
+### 2d-bis. When the controller *owns* the render size (Splatoon 3 / Thunder)
+
+The harder variant: the dynamic-resolution controller is not a downstream clamp on
+a resolution set elsewhere — it is **the only code that writes the render size at
+all**. The layering there is:
+
+| layer | where | what it controls |
+|---|---|---|
+| physical framebuffer | sead `GameFrameworkNx::CreateArg`, two immediates in `nnMain` (`arg+20` width, `arg+24` height) | nn::vi layer + NVN window texture size — the **ceiling** |
+| render size | a packed `WxH` at `gfxstate+0x388` | what `gsys::RenderBuffer::color`/`::depth` are allocated at |
+| crop | `nvnWindowSetCrop`, fed from `gfxstate+0x388` via the display buffer | how much of the window is scanned out |
+
+Patching only the first gives you a 4K window showing an upscaled 1080p image (the
+third diagnostic in §1). The render size has **no boot constant to patch** — it is
+written exclusively by the controller's "apply" path, which fires only on an
+operation-mode *change*. Boot straight into docked mode and it never runs, so the
+field keeps whatever the graphics state was initialised with.
+
+**Technique: make the engine's own apply path do the work.** Prime the controller
+constructor's cached operation mode to a value that differs from the real one
+(`MOVZ W8,#1` → `MOVZ W8,#0` at the `ctrl+0x320` store), so the first frame looks
+like a mode change and the apply path runs. Then turn its ladder lookup and derived
+width into immediates so what it publishes is exactly your target:
+
+```
+LDR W9,[X10,W9,SXTW#2]   ->  MOVZ W9,#<height>   ; ladder[idx]
+FCVTZS W10,S0            ->  MOVZ W10,#<width>   ; height/9*16
+```
+This beats writing the field yourself: the engine re-runs the same path on every
+real dock/undock, so the resolution holds instead of snapping back.
+
+**The frame-1 hazard.** The apply path also pokes the sead display buffer's crop
+directly, and on frame 1 that object does not exist yet — a null-plus-small-offset
+write. Split the path: keep the store to `gfxstate+0x388`, NOP only the
+display-buffer half (`LDR X11,[X11,#0x50]` / `STRB` dirty flag / `STUR` crop x,y /
+`STP` crop w,h). The controller's **per-frame** path performs the same crop write a
+moment later behind a null guard, so nothing is lost.
+
+To decide whether a pointer is safe to dereference on frame 1, find another patch
+that already dereferences it and test that in isolation — if forcing the
+full-resolution flag alone boots (its scale write goes through the same graphics
+state pointer), then that pointer is live and only the *other* object in the
+crashing block can be at fault.
+
+**Debugging notes that cost real time here:**
+- **Ryujinx reports a null-plus-offset fault as address `0x0`.** A write to
+  `null+0x52` and a write to `null+0` produce the identical
+  `Invalid memory access at virtual address 0x0000000000000000`. Do **not** infer
+  the faulting field from the reported address.
+- `InvalidMemoryRegionException` (a null/bad dereference) and `KernelSvc Break` →
+  `nn::diag::detail::Abort` (the game's own assertion) are different classes of
+  problem. Moving from the first to the second is *progress*, not a new bug.
+- **Bisect; do not infer.** With ~15 offsets in one mod, splitting the block into
+  A/B/C groups and testing each identifies the offending line in three runs.
+  Repeated attempts to reason out which line crashed from a stack trace produced
+  three wrong attributions in a row on this engine, each of which cost a rebuild.
+  Compare two stack traces byte-for-byte before claiming a change altered the crash.
+
 ## 3. ARM64 encodings you need (register X9 = Rd 9)
 
 ```
@@ -373,7 +519,12 @@ Common values: width 1920=0x780 2560=0xA00 3840=0xF00; height 1080=0x438 1440=0x
 
 Also used by §2b–§2d: `MOVZ Wd,#imm` = `0x52800000|(imm<<5)|d`;
 `MOVZ Wd,#imm,LSL#16` = `0x52A00000|(imm<<5)|d` (value = `imm<<16`);
-`FMOV Sd,Wn` = `0x1E270000|(n<<5)|d`; `NOP` = `0xD503201F`.
+`FMOV Sd,Wn` = `0x1E270000|(n<<5)|d`; `NOP` = `0xD503201F`;
+`B <target>` = `0x14000000 | (((target - PC) >> 2) & 0x03FFFFFF)`.
+
+Sanity values from Splatoon 3, useful as encoder self-tests:
+`MOVZ W10,#2160` = `0A0E8152`, `MOVK X8,#3840,LSL#32` = `08E0C1F2`,
+`MOVZ W9,#0x3000,LSL#16` (768 MB) = `0900A652`, `B -0x58` = `EAFFFF17`.
 
 ## 4. Verification checklist (do every time)
 1. `get_bytes` the original slots; confirm register, encoding, and slot order.
@@ -395,6 +546,16 @@ Also used by §2b–§2d: `MOVZ Wd,#imm` = `0x52800000|(imm<<5)|d`;
 8. Read the crash log's guest `PROGRAM HALT` block before changing anything: it
    names the file, the heap, the requested size and the available size. Let it pick
    the constant to patch instead of guessing.
+9. When a value you patched reaches its use through a `CSEL`, confirm you patched
+   **every** arm (§2b, the CSEL trap) — otherwise the patch applies and does
+   nothing, and the false negative will mislead everything you try next.
+10. If the mod applied but the image is unchanged, resolve which of the three
+   resolutions (window / render / crop) you actually moved before changing
+   approach — the "fills the window but soft" case in §1 is the usual answer, and
+   it means the render size is a field you have not found yet.
+11. Prefer bisecting a multi-offset block over reasoning about which line crashed
+   (§2d-bis). Two stack traces that differ only in your patch set are worth
+   diffing line-by-line before drawing any conclusion from either.
 
 ## 5. Layout
 Group by **title ID first** — Ryujinx looks up mods per application ID, so mods for

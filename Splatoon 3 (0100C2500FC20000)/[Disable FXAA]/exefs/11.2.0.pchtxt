@@ -1,0 +1,30 @@
+@nsobid-6830B3A12406CB4716FEC5ADDC35D3E2DC92D212
+
+# Splatoon 3 11.2.0 - Disable FXAA
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Disables the FXAA post-process anti-aliasing pass in agl::pfx::FilterAA::draw
+// (sub_7104706060). The filter dispatches on its antialias_type field
+// (this+0x730) through a 4-entry jump table: 0 = FXAA, 1 = ReduceAA ("reduce"),
+// 2 = SMAA (sub_7104709D20), 3 = user callback (this+0xA10). The constructor
+// (sub_7104701D80) leaves antialias_type = 0 and enable (this+0x750) = 1, so
+// FXAA is the live path on a stock game.
+//
+// When enable is 0 the function already falls through to a plain
+// ImageFilter2D::drawTexture pass-through copy at 0x71047062AC -- the exact
+// "no AA" output we want. This replaces the FXAA case's first instruction with
+// an unconditional branch to that block, so only FXAA is redirected;
+// ReduceAA and SMAA stay intact if a scene ever selects them. Because it
+// patches code rather than a config default, no env/byaml archive can undo it.
+
+@enabled
+04706194 46000014   // B (pass-through)   (was LDR S0,[X23,#0x988] = FXAA case entry)
+@stop
+
+// Offsets reverse-engineered against Splatoon 3's sead + Cmn/spl::gfx + agl/gsys
+// engine. 11.2.0 retail is symbol-stripped -- every site above was located by
+// structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

@@ -1,0 +1,30 @@
+@nsobid-6830B3A12406CB4716FEC5ADDC35D3E2DC92D212
+
+# Splatoon 3 11.2.0 - Level of Detail
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces the texture sampler mip-LOD bias to -1.0 for sharper textures.
+// Splatoon 3 builds NVN samplers through TWO independent paths, so both are
+// patched -- patching only one leaves half the game's textures at stock LOD:
+//
+//   * nn::gfx::detail::SamplerImpl<NvnApi>::Initialize (sub_7100A7D85C) --
+//     loads SamplerInfo.lodBias from +0x10 just before
+//     nvnSamplerBuilderSetLodBias.
+//   * agl's own sampler builder (sub_71045A4830), which drives
+//     nvnSamplerBuilder directly and loads its bias from +0x18.
+//
+// Both LDR S0,[Xn,#imm] are replaced with FMOV S0, #-1.0. This rewrites the
+// SOURCE of the bias, so it applies to every sampler the title creates.
+
+@enabled
+00A7D960 00103E1E   // FMOV S0,#-1.0   (was LDR S0,[X20,#0x10] -- nn::gfx SamplerImpl::Initialize)
+045A48E0 00103E1E   // FMOV S0,#-1.0   (was LDR S0,[X20,#0x18] -- agl sampler builder)
+@stop
+
+// Offsets reverse-engineered against Splatoon 3's sead + Cmn/spl::gfx + agl/gsys
+// engine. 11.2.0 retail is symbol-stripped -- every site above was located by
+// structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches
