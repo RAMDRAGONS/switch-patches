@@ -1,0 +1,43 @@
+@nsobid-646761F643AFEBB379EDD5E6A5151AF2CEF93DC1
+
+# Metroid Dread 2.1.0 - 2560x1440 resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Renders at 2560x1440 instead of the stock docked 1600x900.
+//
+// The engine has a single native size: two ints in .data that every window
+// texture, G-buffer, post-process target and the nvnWindowSetCrop rectangle
+// are derived from. Handheld keeps the engine's own 0.8 render scale, so it
+// renders at 2048x1152. Use DOCKED mode for the full size.
+//
+// REQUIRES Ryujinx > System > DRAM Size set to 6 GiB or higher. Render
+// targets come from a fixed 208 MB NVN pool carved out of a static GPU heap
+// that has no free room, so the pool is moved into the unused tail of the
+// application memory heap (the game only claims the first 1255 MB of it) and
+// enlarged to 640 MB. At the default 4 GiB that tail is too small and the
+// game will crash while creating the graphics device.
+//
+// The pool size leaves room for the [Shadow Resolution 4096] mod. This mod
+// OWNS the pool offsets below; do not duplicate them in another enabled mod.
+
+@enabled
+// Native render size (was 1600x900).
+01A1BE18 000A0000   // width  2560
+01A1BE1C A0050000   // height 1440
+// Render-target pool (pool index 3, NVN flags 0xA1). The memory used to come
+// from mspace_memalign on the static GPU heap; take it from the memory heap
+// block at offset 0x4E700000 instead, just past the game's default allocator.
+0015352C E0500490   // ADRP X0, qword_7108B6FED0@PAGE (was LDR X0,[X24,#8] = GPU heap)
+00153534 1500A572   // MOVK W21,#0x2800,LSL#16 -> pool size 0x28001000 (was 0xD001000)
+00153538 006847F9   // LDR  X0,[X0,#0xED0] = heap block base (was MOV W1,#0x100000)
+0015353C 02CEA9D2   // MOVZ X2,#0x4E70,LSL#16 (was MOV X2,X21)
+00153544 0000028B   // ADD  X0,X0,X2 (was BL mspace_memalign)
+@stop
+
+// Offsets reverse-engineered against Metroid Dread 2.1.0 (MercurySteam engine,
+// NVN). The retail build is symbol-stripped; every site was located by
+// structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

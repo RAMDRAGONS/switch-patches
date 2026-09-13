@@ -1,0 +1,37 @@
+@nsobid-646761F643AFEBB379EDD5E6A5151AF2CEF93DC1
+
+# Metroid Dread 2.1.0 - 60 FPS cutscenes
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Runs real-time cutscenes at 60 FPS. Gameplay already runs at 60.
+//
+// Two things hold cutscenes at 30:
+//
+// 1. Entering a cinematic calls the "SetFramerate" script binding
+//    (sub_71001D73EC), which picks NVN present interval 2 while the cinematic
+//    flag is set. This forces interval 1. The flag itself is left alone, so
+//    the cinematic camera, letterboxing and cutscene shadow scale still apply.
+//
+// 2. Cutscenes with a voice/music stream are audio-synced: the main loop
+//    takes its frame delta from the stream position (sub_710119A3D0) and skips
+//    update and render entirely when that delta is ~0. The stream position is
+//    samples consumed / sample rate, which only advances once per audio buffer,
+//    so only every other 60 Hz frame gets drawn. This makes the delta come
+//    from the real frame timer instead. The engine's own sync still applies on
+//    top: the delta is scaled by stream time / cutscene time, and a lag of more
+//    than 0.5 s is caught up in one step, so audio and animation stay aligned.
+//
+// Prerendered .webm videos are not affected.
+
+@enabled
+001D742C E003082A   // MOV W0,W8 = interval 1 (was CINC W0,W8,NE = 2 in cinematics)
+0119A47C 1F2003D5   // NOP = keep timer delta (was FCSEL S0,S1,S0,GT = audio stream delta)
+@stop
+
+// Offsets reverse-engineered against Metroid Dread 2.1.0 (MercurySteam engine,
+// NVN). The retail build is symbol-stripped; every site was located by
+// structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

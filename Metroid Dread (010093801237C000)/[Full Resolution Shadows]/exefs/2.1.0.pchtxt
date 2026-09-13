@@ -1,0 +1,33 @@
+@nsobid-646761F643AFEBB379EDD5E6A5151AF2CEF93DC1
+
+# Metroid Dread 2.1.0 - Full resolution shadows
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Renders gameplay shadow maps at the full resolution cutscenes use.
+//
+// Every frame the shadow pass (sub_7100211590) picks how much of each shadow
+// map a light may use: 0.25 in gameplay and 1.0 in cinematics (unless the
+// cutscene opts out). That factor is stored twice: once as the viewport scale
+// the light is rendered with (sub_7100210A04) and once in the per-light
+// shader data next to the map's texel size (sub_71001CEF80), so the depth
+// render and the sampling stay in agreement. In gameplay a 2048x2048 map is
+// therefore only drawn into a 512x512 corner.
+//
+// Both writes of the 0.25 constant become 1.0, so gameplay and every cutscene
+// use the whole map. Lights flagged to ignore the factor are unaffected.
+//
+// Costs about 16x the shadow-map fill for those lights. Stacks with
+// [Shadow Resolution 4096], which then gives 4096x4096 in gameplay too.
+
+@enabled
+00211868 08F0A752   // MOVZ W8,#0x3F80,LSL#16 = 1.0f (was 0.25f, gameplay scale)
+002118A0 08F0A752   // MOVZ W8,#0x3F80,LSL#16 = 1.0f (was 0.25f, cutscene opt-out)
+@stop
+
+// Offsets reverse-engineered against Metroid Dread 2.1.0 (MercurySteam engine,
+// NVN). The retail build is symbol-stripped; every site was located by
+// structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

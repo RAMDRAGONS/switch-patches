@@ -1,0 +1,60 @@
+@nsobid-646761F643AFEBB379EDD5E6A5151AF2CEF93DC1
+
+# Metroid Dread 2.1.0 - 4096x4096 shadow resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Doubles every shadow map: the four 2048x2048 directional (vector light)
+// maps become 4096x4096, and the ten 512x512 spot/point light maps become
+// 1024x1024. All are DEPTH16 textures created once by the shadow pool
+// (sub_71001E9B54 / sub_71001E9C44).
+//
+// Nothing downstream hardcodes the size: when a light is assigned a map, its
+// viewport is read back from the texture's own width and height and then
+// scaled by the light's shadow scale (sub_7100210A04), so the larger texture
+// is used at full size.
+//
+// REQUIRES one of the [WxH] resolution mods. The maps live in the same fixed
+// render-target pool as the G-buffers and grow it by about 111 MB, which the
+// stock pool cannot absorb. The resolution mods own that pool and already
+// size it for this mod; do NOT copy their offsets here.
+
+@enabled
+// Directional shadow maps, 4 slots of 2048x2048.
+001E9B7C 01008252   // MOVZ W1,#4096 (was 2048)
+001E9B80 02008252   // MOVZ W2,#4096 (was 2048)
+001E9BB0 01008252   // MOVZ W1,#4096 (was 2048)
+001E9BB4 02008252   // MOVZ W2,#4096 (was 2048)
+001E9BE0 01008252   // MOVZ W1,#4096 (was 2048)
+001E9BE4 02008252   // MOVZ W2,#4096 (was 2048)
+001E9C10 01008252   // MOVZ W1,#4096 (was 2048)
+001E9C14 02008252   // MOVZ W2,#4096 (was 2048)
+// Spot/point light shadow maps, 10 slots of 512x512.
+001E9C6C 01808052   // MOVZ W1,#1024 (was 512)
+001E9C70 02808052   // MOVZ W2,#1024 (was 512)
+001E9CA0 01808052   // MOVZ W1,#1024 (was 512)
+001E9CA4 02808052   // MOVZ W2,#1024 (was 512)
+001E9CD0 01808052   // MOVZ W1,#1024 (was 512)
+001E9CD4 02808052   // MOVZ W2,#1024 (was 512)
+001E9D00 01808052   // MOVZ W1,#1024 (was 512)
+001E9D04 02808052   // MOVZ W2,#1024 (was 512)
+001E9D30 01808052   // MOVZ W1,#1024 (was 512)
+001E9D34 02808052   // MOVZ W2,#1024 (was 512)
+001E9D60 01808052   // MOVZ W1,#1024 (was 512)
+001E9D64 02808052   // MOVZ W2,#1024 (was 512)
+001E9D90 01808052   // MOVZ W1,#1024 (was 512)
+001E9D94 02808052   // MOVZ W2,#1024 (was 512)
+001E9DC0 01808052   // MOVZ W1,#1024 (was 512)
+001E9DC4 02808052   // MOVZ W2,#1024 (was 512)
+001E9DF0 01808052   // MOVZ W1,#1024 (was 512)
+001E9DF4 02808052   // MOVZ W2,#1024 (was 512)
+001E9E20 01808052   // MOVZ W1,#1024 (was 512)
+001E9E24 02808052   // MOVZ W2,#1024 (was 512)
+@stop
+
+// Offsets reverse-engineered against Metroid Dread 2.1.0 (MercurySteam engine,
+// NVN). The retail build is symbol-stripped; every site was located by
+// structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches
