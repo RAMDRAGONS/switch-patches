@@ -1,0 +1,76 @@
+@nsobid-41EAE379C103E9A512CFA931BA400E938B3B7C55
+
+# Captain Toad Treasure Tracker 1.4.2 - 3840x2160 resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Renders at 3840x2160 in both docked and handheld mode.
+//
+// The engine keeps three sizes: the display buffer the nn::vi layer
+// presents, two frame buffers the scene is composed into (docked and
+// handheld, each with a virtual size and a texture size), and the 3D render
+// size from al::GraphicsStressDirector::getBufferSizeX/Y, which follows the
+// dynamic quality controller and is clamped to the frame buffer's virtual
+// size. Stock docked play keeps all of them at 1920x1080; handheld keeps
+// the 1920x1080 virtual size and shrinks the texture and render to
+// 1280x720.
+//
+// Every one of those sizes is raised to 3840x2160, so the render, the
+// viewports laid over it and the textures it resolves into stay in the
+// same 1:1 relation as stock docked play. Rendering above the virtual size
+// is not a layout the engine supports. The two frame buffers share one
+// allocation, so they must stay the same size. Both size getters return
+// the fixed size, which also stops the dynamic quality controller from
+// lowering it.
+//
+// Every render target, including the cascaded shadow map, comes from the
+// agl::utl::DynamicTextureAllocator pool (100 MB at 1080p) inside AglHeap
+// (170 MB). The pool is raised to 832 MB, which also leaves room for the
+// [Shadow Resolution 4096] mod, and AglHeap grows by the same amount. The
+// sead root heap (2379 MB) grows by the pool increase plus the larger
+// display, frame buffer and screen capture textures, so the scene heaps
+// keep their stock headroom.
+//
+// REQUIRES Ryujinx > System > DRAM Size set to 6 GiB or higher. The root
+// heap no longer fits the 3 GB memory heap the game requests in
+// nninitStartup, so that request is raised to 3.5 GB, which is more than
+// the default 4 GiB setting gives an application.
+//
+// This mod OWNS the pool and heap offsets below; do not duplicate them in
+// another enabled mod.
+
+@enabled
+// Display buffer size in the sead::GameFrameworkNx::CreateArg (was 1920x1080).
+0025E084 08E081D2   // MOVZ X8,#3840
+0025E090 080EC1F2   // MOVK X8,#2160,LSL#32
+// sead::GameFrameworkNx::initializeGraphicsSystem logical frame buffer size.
+0025E0CC 08AEA8D2   // MOVZ X8,#0x4570,LSL#16 = 3840.0f (was 1920.0f)
+0025E0D8 E8A0E8F2   // MOVK X8,#0x4507,LSL#48 = 2160.0f (was 1080.0f)
+// al::GameFrameworkNx::initAgl frame buffers.
+0025E0F4 030E8152   // MOVZ W3,#2160 (was 1080, virtual height)
+0025E0FC 06E08152   // MOVZ W6,#3840 (was 1280, handheld texture)
+0025E100 070E8152   // MOVZ W7,#2160 (was 720, handheld texture)
+0025E104 02E08152   // MOVZ W2,#3840 (was 1920, virtual width)
+0025E108 04E08152   // MOVZ W4,#3840 (was 1920, docked texture)
+0025E110 050E8152   // MOVZ W5,#2160 (was MOV W5,W3 = 1080, docked texture)
+// al::GraphicsStressDirector::getBufferSizeX / getBufferSizeY.
+002D7210 00E08152   // MOVZ W0,#3840
+002D7214 C0035FD6   // RET
+002D72E0 000E8152   // MOVZ W0,#2160
+002D72E4 C0035FD6   // RET
+// agl::InitArg DynamicTextureAllocator pool and the AglHeap holding it.
+0040C240 0880A652   // MOVZ W8,#0x3400,LSL#16 = 832 MB (was 100 MB)
+0040C208 000CA752   // MOVZ W0,#0x3860,LSL#16 = 902 MB (was 170 MB)
+// sead root heap in ApplicationFunction::initialize.
+0025E8E4 0896B952   // MOVZ W8,#0xCCB0,LSL#16 = 3275 MB (was 2379 MB)
+// Memory heap in nninitStartup.
+0026AE6C 0000BC52   // MOVZ W0,#0xE000,LSL#16 = 3584 MB (was 3072 MB)
+@stop
+
+// Offsets reverse-engineered against Captain Toad Treasure Tracker 1.4.2
+// (al + agl + sead, NVN). The retail build keeps its symbol table; every
+// site was located by symbol and byte-verified against the IDB before
+// being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

@@ -1,0 +1,26 @@
+@nsobid-41EAE379C103E9A512CFA931BA400E938B3B7C55
+
+# Captain Toad Treasure Tracker 1.4.2 - Disable FXAA
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Disables FXAA on the agl::pfx::FilterAA post effect.
+//
+// al::ViewRenderer::drawView runs FilterAA once per frame when the
+// StressParam AntiAliasingType selects it. agl::pfx::FilterAA::draw_
+// dispatches on antialias_type (0 FXAA, 1 ReduceAA, 2 SMAA, 3 callback)
+// and falls back to a plain ImageFilter2D::drawTexture copy when the
+// filter is off. The FXAA case now branches to that copy, so the frame is
+// passed through unfiltered while the other modes are left untouched.
+
+@enabled
+006297C8 06000014   // B +0x18 to the pass-through copy (was MOV X0,X21 = FXAA case)
+@stop
+
+// Offsets reverse-engineered against Captain Toad Treasure Tracker 1.4.2
+// (al + agl + sead, NVN). The retail build keeps its symbol table; every
+// site was located by symbol and byte-verified against the IDB before
+// being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

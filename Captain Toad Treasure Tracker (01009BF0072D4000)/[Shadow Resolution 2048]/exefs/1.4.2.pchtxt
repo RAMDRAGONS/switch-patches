@@ -1,0 +1,35 @@
+@nsobid-41EAE379C103E9A512CFA931BA400E938B3B7C55
+
+# Captain Toad Treasure Tracker 1.4.2 - 2048x2048 shadow resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces the depth shadow map to 2048x2048 (stock DepthShadowParam
+// defaults: ShadowMapSize 1024, PrePassShadowMapSize 512; stage archives
+// can override them).
+//
+// al::ShadowDirector::movement is the only caller of
+// agl::sdw::ShadowMap::setSize. Every frame it reads PrePassShadowMapSize
+// for the light pre-pass shadow types and ShadowMapSize otherwise, and
+// the map, its cascade viewports and the shader texel size all follow
+// that one value. Both reads become the fixed size.
+//
+// The map is a Depth_32 texture array of up to three cascades from the
+// agl::utl::DynamicTextureAllocator pool, about 50 MB at this size (stock
+// about 13 MB). The stock 100 MB pool is sized for native rendering; if
+// the game aborts in DynamicTextureAllocator::alloc_, pair this with one
+// of the [WxH] resolution mods, which own that pool. Do NOT copy their
+// offsets here.
+
+@enabled
+003B256C 09008152   // MOVZ W9,#2048 (was LDR W9,[X19,#0x1F0] = PrePassShadowMapSize)
+003B2574 09008152   // MOVZ W9,#2048 (was LDR W9,[X19,#0x1D0] = ShadowMapSize)
+@stop
+
+// Offsets reverse-engineered against Captain Toad Treasure Tracker 1.4.2
+// (al + agl + sead, NVN). The retail build keeps its symbol table; every
+// site was located by symbol and byte-verified against the IDB before
+// being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches
