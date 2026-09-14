@@ -1,0 +1,69 @@
+@nsobid-6C4BC35D955FABDEF98616FA93F38FAF49B5FE48
+
+# Clubhouse Games 51 Worldwide Classics 2.0.1 - 2560x1440 resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Renders at 2560x1440 in both docked and handheld mode.
+//
+// The engine keeps three sizes: a window size that every display texture is
+// allocated at and that caps everything else, a per-mode render size for the
+// 3D scene (stage 0) and the final image (stage 1), and a base resolution
+// (1920x1080) that viewports and layouts are authored in. Stock docked play
+// renders stage 0 at 1600x900 or 1920x1080 and stage 1 at 1920x1080, and
+// every render size is clamped to the window size.
+//
+// The engine ships a developer high-resolution mode behind one flag in
+// bex::SystemMain (+0x294). When set, boot applies 3840x2160 to both modes,
+// the nd::NdRender render-target slot table is allocated at twice its
+// 1920x1080 dimensions, and SetRenderingResolutionModeNormal/Boost and
+// ResetParameter stop lowering the render size per scene. Every read of that
+// flag is forced to 1 here, the fixed boot size is changed from 3840x2160
+// to 2560x1440, and the window size is pinned so the clamp lets the full
+// size through. The base resolution is left alone, so viewports, UI and
+// cameras keep their 1920x1080 coordinate space.
+//
+// Two GPU memory pools scale with the render size and are enlarged: pool 3
+// (display and renderer targets, 128 MB) and pool 4 (engine render textures
+// and the cascaded shadow map, 128 MB). Pool 4 also leaves room for the
+// [Shadow Resolution 4096] mod. The pool sizes are the engine's built-in
+// defaults; boot.lua can in principle override them.
+//
+// REQUIRES Ryujinx > System > DRAM Size set to 6 GiB or higher. All of the
+// above comes out of the main heap. At boot the game reserves every byte of
+// application memory as one block, but then hands its allocator at most
+// 0xC7500000 (about 3.19 GB) of it, so any larger DRAM setting is wasted
+// and asset loading fails once the bigger buffers are in. The allocator is
+// given the whole reserved block instead.
+//
+// This mod OWNS the pool and heap offsets below; do not duplicate them in
+// another enabled mod.
+
+@enabled
+// Main heap: pass the full reserved block to the allocator.
+007C8BC4 F40315AA   // MOV X20,X21 = full heap size (was CSEL X20,X9,X21,HI = 3.19 GB cap)
+// High-resolution mode flag readers (were LDR W8,[Xn,#0x294]).
+0022C65C 28008052   // MOVZ W8,#1  boot: apply the fixed render size to both modes
+0022F5B4 28008052   // MOVZ W8,#1  nd::NdRender: double the render-target slot pool
+00230CEC 28008052   // MOVZ W8,#1  ResetParameter: skip per-scene render sizes
+00231468 28008052   // MOVZ W8,#1  SetRenderingResolutionModeNormal: ignore
+002314CC 28008052   // MOVZ W8,#1  SetRenderingResolutionModeBoost: ignore
+// Fixed boot render size.
+0022C66C 16B48052   // MOVZ W22,#1440 (was 2160)
+0022C674 02408152   // MOVZ W2,#2560  (was 3840, docked)
+0022C68C 02408152   // MOVZ W2,#2560  (was 3840, handheld)
+// Window size, the clamp for every render size (stock 1920x1080).
+00689064 09408152   // MOVZ W9,#2560 (was LDR W9,[X1,#0x64])
+00689078 09B48052   // MOVZ W9,#1440 (was LDR W9,[X1,#0x68])
+// GPU memory pool defaults in .rodata (group 0, both were 0x08000000 = 128 MB).
+00FC3FF8 00000010   // pool 3 = 256 MB
+00FC3FFC 00000018   // pool 4 = 384 MB
+@stop
+
+// Offsets reverse-engineered against Clubhouse Games 51 Worldwide Classics
+// 2.0.1 (NdCube Bezel engine + nd::NdRender, NVN). The retail build keeps only
+// a partial symbol table; every site was located by structure and
+// byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

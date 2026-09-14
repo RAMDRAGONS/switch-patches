@@ -1,0 +1,26 @@
+@nsobid-6C4BC35D955FABDEF98616FA93F38FAF49B5FE48
+
+# Clubhouse Games 51 Worldwide Classics 2.0.1 - Disable FXAA
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Disables FXAA on the nd::NdRender post effect.
+//
+// FXAA is not a separate pass: the tonemap pass (sub_71002F9C24) picks one of
+// ten shader programs, tonemap_{linear,filmic,ut2,reinhard,gt} (10-14) or the
+// same five with FXAA folded in, posteffect_fxaa_tonemap_* (15-19). The choice
+// comes from the post effect's fxaa_enable flag (sub_71002BF098), which is
+// also forced on whenever the console is docked. Taking the plain tonemap
+// program keeps tonemapping identical and only drops the FXAA blur.
+
+@enabled
+002F9DD8 E103082A   // MOV W1,W8 = plain tonemap program (was CSEL W1,W9,W8,NE)
+@stop
+
+// Offsets reverse-engineered against Clubhouse Games 51 Worldwide Classics
+// 2.0.1 (NdCube Bezel engine + nd::NdRender, NVN). The retail build keeps only
+// a partial symbol table; every site was located by structure and
+// byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

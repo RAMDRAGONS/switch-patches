@@ -1,0 +1,32 @@
+@nsobid-6C4BC35D955FABDEF98616FA93F38FAF49B5FE48
+
+# Clubhouse Games 51 Worldwide Classics 2.0.1 - 2048x2048 shadow resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces the cascaded shadow map to 2048x2048 (stock default 1024x1024).
+//
+// The engine shadow system allocates a four-cascade D16 texture array sized by
+// its current shadow map size and recreates it whenever that size changes, so
+// scripts can resize it at runtime. Every consumer reads the size through
+// one getter (sub_710068F5E4: allocation, per-frame resize check and the
+// shadow draw) or directly when setting the cascade viewports
+// (sub_7100753FF0). Both reads become the fixed size, so the texture, the
+// viewports and the shader texel size stay in agreement.
+//
+// The maps come from GPU memory pool 4 and grow it by about 24 MB, which the
+// stock pool absorbs. The [WxH] resolution mods own that pool; do NOT copy
+// their offsets here.
+
+@enabled
+0068F5FC 00008152   // MOVZ W0,#2048  (was LDR W0,[X8,X9] = current shadow map size)
+0075403C 15008152   // MOVZ W21,#2048 (was LDR W21,[X20,X8], cascade viewport size)
+@stop
+
+// Offsets reverse-engineered against Clubhouse Games 51 Worldwide Classics
+// 2.0.1 (NdCube Bezel engine + nd::NdRender, NVN). The retail build keeps only
+// a partial symbol table; every site was located by structure and
+// byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches
