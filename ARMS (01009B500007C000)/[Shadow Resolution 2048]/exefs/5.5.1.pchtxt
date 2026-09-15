@@ -1,0 +1,37 @@
+@nsobid-BBA3811191DE71D9B55E53F918AE5DC1
+
+# ARMS 5.5.1 - 2048x2048 shadow resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces the cascaded depth shadow map to 2048x2048 (stock
+// shadow_map_size and depth_shadow_tex_width/height 1024; scene archives
+// can override them).
+//
+// Two paths size the map. Every frame the gfx manager copies
+// shadow_map_size into each model scene's agl::sdw::ShadowMap, and
+// gsys::ModelSceneShadow::drawDepthShadow reads depth_shadow_tex_width and
+// depth_shadow_tex_height from gsys::ModelSceneConfig, scales them by the
+// viewport ratio and clamps the result so it never exceeds the configured
+// size before calling ShadowMap::setSize. All three reads become the fixed
+// size, so both paths agree on it.
+//
+// The map is a texture array of up to two cascades from the
+// agl::utl::DynamicTextureAllocator pool, 4x the stock texel count at this
+// size. The stock 96 MB pool is sized for native rendering; if the game
+// aborts in DynamicTextureAllocator::alloc_, pair this with one of the
+// [WxH] resolution mods, which own that pool. Do NOT copy their offsets
+// here.
+
+@enabled
+000CFFD8 16008152   // MOVZ W22,#2048 (was CSEL W22,W9,W10,NE = shadow_map_size)
+00A47998 09008152   // MOVZ W9,#2048 (was LDR W9,[X8,#0x1818] = depth_shadow_tex_width)
+00A4799C 08008152   // MOVZ W8,#2048 (was LDR W8,[X8,#0x1838] = depth_shadow_tex_height)
+@stop
+
+// Offsets reverse-engineered against ARMS 5.5.1 (Cstm/Lp + gsys/agl +
+// sead, NVN). The retail build is symbol-stripped; every site was located
+// by structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

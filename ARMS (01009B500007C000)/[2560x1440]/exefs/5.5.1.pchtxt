@@ -1,0 +1,90 @@
+@nsobid-BBA3811191DE71D9B55E53F918AE5DC1
+
+# ARMS 5.5.1 - 2560x1440 resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Renders at 2560x1440 in both docked and handheld mode.
+//
+// The engine keeps three sizes: the scan buffer from the Cstm
+// getScanBufferSize singleton, which sead::GameFrameworkNx allocates its
+// display buffers at and gsys allocates its render buffers at;
+// a frame buffer scale that the gfx manager recomputes every frame as
+// ladder height / scan buffer height; and a display buffer crop that it
+// sets to the absolute ladder size. The ladder holds sizes from 864x486 to
+// 1920x1080. Stock play selects entry 7 (1920x1080) docked and entry 3
+// (1280x720) handheld at most, some modes and replay scenes cap it lower,
+// and unless force_max_resolution is set the scale is also clamped to a
+// height cap (1053 lines by default).
+//
+// The scan buffer and ladder entry 7 are raised to 2560x1440, the selected
+// entry is pinned to 7 and the height cap is skipped, so the render, the
+// frame buffer and the crop all stay at the full size and the dynamic
+// resolution controller can no longer lower them. The 2D canvas is a fixed
+// 1280x720 layout space and needs no change.
+//
+// Two in-match layout managers also size their 3D panel render buffers
+// from the selected ladder entry. The panels are drawn into the 1280x720
+// layout, and building them at the raised size crashes on match load, so
+// both call sites are pinned to the stock maximum of 1920x1080.
+//
+// Every render target and the cascaded shadow map come from the
+// agl::utl::DynamicTextureAllocator pool gsys requests at boot (96 MB). The
+// pool is raised to 512 MB, which also leaves room for the
+// [Shadow Resolution 4096] mod.
+//
+// gsys and the pool live in the cGfx heap group partition (1820 MB). Right
+// after gsys starts, GfxDynamicHeapMgr takes what is left of cGfx and
+// splits 1572 MB of fixed sub-heaps out of it, so stock play leaves gsys at
+// most 248 MB. cGfx grows by the pool increase plus 256 MB for the
+// render buffers gsys allocates outside the pool, which grow with the
+// scan buffer.
+//
+// sead::GameFrameworkNx creates its display buffers inside the cSys heap
+// group partition (491 MB), in a heap that takes everything left and is
+// then trimmed, and every Arms and Lp system manager created afterwards
+// takes its heap from what remains. Stock boot leaves under 16 MB spare,
+// so the larger display buffers leave a later manager with a null heap.
+// cSys is raised to 555 MB.
+//
+// REQUIRES Ryujinx > System > DRAM Size set to 6 GiB or higher. The fixed
+// heap group partitions total 3807 MB after this change, more than the
+// 3285 MB application pool the default 4 GiB setting provides. The game
+// sizes its memory heap from whatever the emulator gives it, so no other
+// memory change is needed.
+//
+// This mod OWNS the pool and heap offsets below; do not duplicate them in
+// another enabled mod.
+
+@enabled
+// Scan buffer size in both getScanBufferSize getters (was 1920x1080).
+00757234 084081D2   // MOVZ X8,#2560
+00757238 08B4C0F2   // MOVK X8,#1440,LSL#32
+00757460 084081D2   // MOVZ X8,#2560
+00757464 08B4C0F2   // MOVK X8,#1440,LSL#32
+// Resolution ladder entry 7 (was 1920.0f x 1080.0f).
+000CE764 08A4A852   // MOVZ W8,#0x4520,LSL#16 = 2560.0f
+000CE768 8996A852   // MOVZ W9,#0x44B4,LSL#16 = 1440.0f
+// 3D panel render buffer size in two layout managers (was ladder entry).
+0067CEE8 02878052   // MOVZ W2,#1080 (was FCVTZS W2,S1)
+0067CEEC 01F08052   // MOVZ W1,#1920 (was FCVTZS W1,S0)
+00680FB8 02878052   // MOVZ W2,#1080 (was FCVTZS W2,S1)
+00680FBC 01F08052   // MOVZ W1,#1920 (was FCVTZS W1,S0)
+// Dynamic resolution controller: always select ladder entry 7.
+000CF928 F7008052   // MOVZ W23,#7 (was CSEL W23,W8,W10,EQ)
+// Frame buffer scale: skip the height cap.
+000D4A64 04000014   // B +0x10 (was TBNZ W8,#3 = force max resolution)
+// gsys::SystemTask::CreateArg DynamicTextureAllocator pool.
+000D6238 0800A452   // MOVZ W8,#0x2000,LSL#16 = 512 MB (was 96 MB)
+// cSys heap group partition, shared by both memory layouts.
+0074DE08 0856A452   // MOVZ W8,#0x22B0,LSL#16 = 555 MB (was 491 MB)
+// cGfx heap group partition, shared by both memory layouts.
+0074DE18 0A78B352   // MOVZ W10,#0x9BC0,LSL#16 = 2492 MB (was 1820 MB)
+@stop
+
+// Offsets reverse-engineered against ARMS 5.5.1 (Cstm/Lp + gsys/agl +
+// sead, NVN). The retail build is symbol-stripped; every site was located
+// by structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

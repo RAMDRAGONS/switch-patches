@@ -1,0 +1,25 @@
+@nsobid-BBA3811191DE71D9B55E53F918AE5DC1
+
+# ARMS 5.5.1 - Disable FXAA
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Disables FXAA on the agl::pfx::FilterAA post effect.
+//
+// agl::pfx::FilterAA::draw checks the filter's enable flag and scale, then
+// dispatches on antialias_type through a compare chain (2 SMAA, 1 ReduceAA,
+// 0 falls through to FXAA). When the filter is off it copies the frame with
+// ImageFilter2D::drawTexture instead. The branch guarding the FXAA
+// fall-through now jumps to that copy, so the frame is passed through
+// unfiltered while the other modes are left untouched.
+
+@enabled
+0099F540 0C000014   // B +0x30 to the pass-through copy (was CBNZ W9 guarding the FXAA case)
+@stop
+
+// Offsets reverse-engineered against ARMS 5.5.1 (Cstm/Lp + gsys/agl +
+// sead, NVN). The retail build is symbol-stripped; every site was located
+// by structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches
