@@ -1,0 +1,122 @@
+@nsobid-0EFFE4AF1DEC3A7966B934D4A7C3D2BF566A9C62
+
+# Paper Mario: The Thousand-Year Door 1.0.1 - 2560x1440 docked, 1280x720 handheld
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Renders at 2560x1440 docked and 1280x720 handheld.
+// Do not combine with the Lighting Fix mod: it only hides the corruption
+// fixed here by disabling spot lights and default point-light intensity.
+//
+// REQUIRES Ryujinx > System > DRAM Size set to 6 GiB or higher for the
+// enlarged render-target pool.
+
+@enabled
+// Texture allocator (sub_710024F058). Resize handlers recreate each render
+// target at the pool offset it got when first created, sized for the stock
+// 1600x900 docked resolution. Any target grown past that allocation spills
+// into the next texture in the pool, which corrupts the G-buffer and
+// tile-lighting targets; the corruption scales with resolution. The size
+// reserved for each texture is recorded in its unused info-struct slot
+// (+0x38), and a resize that needs more than that gets a fresh allocation.
+0024F0F0 891A80B9
+0024F0F4 AA0E098B
+0024F0F8 4A0D58F9
+0024F0FC 971240F9
+0024F100 3F050031
+0024F104 F7028A9A
+0024F108 180B0012
+0024F10C 9B0A40F9
+0024F110 E00315AA
+0024F114 E1031BAA
+0024F118 05DFFE97   // BL  sub_7100206D2C (storage size)
+0024F11C F60300AA
+0024F120 E00315AA
+0024F124 E1031BAA
+0024F128 EADEFE97   // BL  sub_7100206CD0 (alignment)
+0024F12C 681F40F9   // reserved size
+0024F130 DF0208EB
+0024F134 09010054   // fits: reuse the existing offset
+0024F138 E8B240F9
+0024F13C 090400D1
+0024F140 0801098B
+0024F144 1301298A
+0024F148 6802168B
+0024F14C E8B200F9
+0024F150 761F00F9   // record reservation
+// Pool_Invisible (render targets) size, stock 0x14180000 (321 MB). Leaves room
+// for every resizable target at this resolution plus its original slot.
+0030A220 0800A952   // MOVZ W8,#0x4800,LSL#16 = 1152 MB
+// Docked render size (sub_710030EE08 / sub_710030EEF8, both config paths).
+0030EECC 09B48052   // MOVZ W9,#0x5A0
+0030EED0 08408152   // MOVZ W8,#0xA00
+0030F044 09B48052   // MOVZ W9,#0x5A0
+0030F048 08408152   // MOVZ W8,#0xA00
+0030EE84 09408152   // MOVZ W9,#0xA00
+0030EE90 0AB48052   // MOVZ W10,#0x5A0
+0030EF80 09408152   // MOVZ W9,#0xA00
+0030EF8C 0AB48052   // MOVZ W10,#0x5A0
+// Handheld render size (sub_710030ED1C / sub_710030EEF8, both config paths).
+0030EDE0 095A8052   // MOVZ W9,#0x2D0
+0030EDE4 08A08052   // MOVZ W8,#0x500
+0030F080 095A8052   // MOVZ W9,#0x2D0
+0030F084 08A08052   // MOVZ W8,#0x500
+0030ED98 09A08052   // MOVZ W9,#0x500
+0030EDA4 0A5A8052   // MOVZ W10,#0x2D0
+0030EFFC 09A08052   // MOVZ W9,#0x500
+0030F008 0A5A8052   // MOVZ W10,#0x2D0
+// Docked output size: window texture, scan-out crop, pre_hud buffer, viewport
+// and the virtual screen size getters.
+0030A24C 08B48052   // MOVZ W8,#0x5A0
+0030A25C 0940C1F2   // MOVK X9,#0xA00,LSL#32
+0030AA7C 084081D2   // MOVZ X8,#0xA00
+0030AA88 08B4C0F2   // MOVK X8,#0x5A0,LSL#32
+0030E4AC 02B48052   // MOVZ W2,#0x5A0
+0030E4B0 01408152   // MOVZ W1,#0xA00
+0030E768 04B48052   // MOVZ W4,#0x5A0
+0030E774 03408152   // MOVZ W3,#0xA00
+00364A54 08408152   // MOVZ W8,#0xA00
+00364A5C 0AB48052   // MOVZ W10,#0x5A0
+0030FC20 09408152   // MOVZ W9,#0xA00
+0030FC28 0AB48052   // MOVZ W10,#0x5A0
+0030FC1C 0BA4A852   // MOVZ W11,#0x4520,LSL#16 = 2560.0f
+0030FC2C 8B96A852   // MOVZ W11,#0x44B4,LSL#16 = 1440.0f
+00331584 0A408152   // MOVZ W10,#0xA00
+003315D4 0AB48052   // MOVZ W10,#0x5A0
+// Tile-lighting light-list buffer (sub_710037A8B0). The engine sizes it for
+// 120x68 tiles x 2048 bytes, the 16 px tile grid of a 1920x1080 frame, while
+// the culling compute dispatch and the forward passes index it with the tile
+// grid of the actual render size. Rows past that capacity read no or wrong
+// lights, which shows up in rooms with local light sources. Sized here for
+// 160x90 tiles.
+0037AFDC 4838A052   // MOVZ W8,#0x1C2,LSL#16 = buffer size
+0037AFEC 4838A0D2   // MOVZ X8,#0x1C2,LSL#16 = buffer create size
+0037F3E4 4238A052   // MOVZ W2,#0x1C2,LSL#16 = 0xFF fill length
+// Pool_Uncached size, stock 0x3D00000 (61 MB). Holds both frame copies of the
+// light-list buffer.
+0030A1C8 08B0A052   // MOVZ W8,#0x580,LSL#16 = 88 MB
+// Post-process pass rectangles (sub_71003AF3E4) are authored in 1920x1080
+// units and scaled to the output size, using 3840x2160 only for native 4K.
+// Drop the 4K test so the docked flag, still in the flags from CMP W9,#0,
+// selects the output-size scale, and make that scale 2560x1440.
+003AF5B0 1F2003D5   // NOP (TST W8,W10)
+003AF5B4 08A4A852   // MOVZ W8,#0x4520,LSL#16 = 2560.0f
+003AF5BC 8896A852   // MOVZ W8,#0x44B4,LSL#16 = 1440.0f
+003AF7EC 1F2003D5   // NOP (TST W8,W10)
+003AF7F0 08A4A852   // MOVZ W8,#0x4520,LSL#16 = 2560.0f
+003AF7F8 8896A852   // MOVZ W8,#0x44B4,LSL#16 = 1440.0f
+// Final filter blur buffers (sub_7100386ED8 resize), docked output size.
+00386F4C 09408152   // MOVZ W9,#0xA00
+00386F54 0BB48052   // MOVZ W11,#0x5A0
+// Final "correct" pass (sub_71003862D0) turns sharpening off when rendering at
+// the native output size; treat 2560x1440 as native.
+00386464 3F012871   // CMP W9,#0xA00
+00386470 1F811671   // CMP W8,#0x5A0
+@stop
+
+// Resolution sites by Fl4sh (https://github.com/Fl4sh9174). Allocator and
+// memory pool fixes reverse-engineered against 1.0.1 and byte-verified
+// against the decompressed main.
+//
+// https://github.com/RAMDRAGONS/switch-patches

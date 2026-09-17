@@ -1,0 +1,75 @@
+@nsobid-0EFFE4AF1DEC3A7966B934D4A7C3D2BF566A9C62
+
+# Paper Mario: The Thousand-Year Door 1.0.1 - 1920x1080 docked, 1280x720 handheld
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Renders at 1920x1080 docked and 1280x720 handheld.
+// Do not combine with the Lighting Fix mod: it only hides the corruption
+// fixed here by disabling spot lights and default point-light intensity.
+//
+// The larger render-target pool may need Ryujinx > System > DRAM Size set to
+// 6 GiB if the game crashes while creating the graphics device.
+
+@enabled
+// Texture allocator (sub_710024F058). Resize handlers recreate each render
+// target at the pool offset it got when first created, sized for the stock
+// 1600x900 docked resolution. Any target grown past that allocation spills
+// into the next texture in the pool, which corrupts the G-buffer and
+// tile-lighting targets; the corruption scales with resolution. The size
+// reserved for each texture is recorded in its unused info-struct slot
+// (+0x38), and a resize that needs more than that gets a fresh allocation.
+0024F0F0 891A80B9
+0024F0F4 AA0E098B
+0024F0F8 4A0D58F9
+0024F0FC 971240F9
+0024F100 3F050031
+0024F104 F7028A9A
+0024F108 180B0012
+0024F10C 9B0A40F9
+0024F110 E00315AA
+0024F114 E1031BAA
+0024F118 05DFFE97   // BL  sub_7100206D2C (storage size)
+0024F11C F60300AA
+0024F120 E00315AA
+0024F124 E1031BAA
+0024F128 EADEFE97   // BL  sub_7100206CD0 (alignment)
+0024F12C 681F40F9   // reserved size
+0024F130 DF0208EB
+0024F134 09010054   // fits: reuse the existing offset
+0024F138 E8B240F9
+0024F13C 090400D1
+0024F140 0801098B
+0024F144 1301298A
+0024F148 6802168B
+0024F14C E8B200F9
+0024F150 761F00F9   // record reservation
+// Pool_Invisible (render targets) size, stock 0x14180000 (321 MB). Leaves room
+// for every resizable target at this resolution plus its original slot.
+0030A220 0820A652   // MOVZ W8,#0x3100,LSL#16 = 784 MB
+// Docked render size (sub_710030EE08 / sub_710030EEF8, both config paths).
+0030EECC 09878052   // MOVZ W9,#0x438
+0030EED0 08F08052   // MOVZ W8,#0x780
+0030F044 09878052   // MOVZ W9,#0x438
+0030F048 08F08052   // MOVZ W8,#0x780
+0030EE84 09F08052   // MOVZ W9,#0x780
+0030EE90 0A878052   // MOVZ W10,#0x438
+0030EF80 09F08052   // MOVZ W9,#0x780
+0030EF8C 0A878052   // MOVZ W10,#0x438
+// Handheld render size (sub_710030ED1C / sub_710030EEF8, both config paths).
+0030EDE0 095A8052   // MOVZ W9,#0x2D0
+0030EDE4 08A08052   // MOVZ W8,#0x500
+0030F080 095A8052   // MOVZ W9,#0x2D0
+0030F084 08A08052   // MOVZ W8,#0x500
+0030ED98 09A08052   // MOVZ W9,#0x500
+0030EDA4 0A5A8052   // MOVZ W10,#0x2D0
+0030EFFC 09A08052   // MOVZ W9,#0x500
+0030F008 0A5A8052   // MOVZ W10,#0x2D0
+@stop
+
+// Resolution sites by Fl4sh (https://github.com/Fl4sh9174). Allocator and
+// memory pool fixes reverse-engineered against 1.0.1 and byte-verified
+// against the decompressed main.
+//
+// https://github.com/RAMDRAGONS/switch-patches
