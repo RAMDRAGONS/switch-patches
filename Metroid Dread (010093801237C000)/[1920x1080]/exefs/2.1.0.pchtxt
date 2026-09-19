@@ -34,6 +34,10 @@
 00153538 006847F9   // LDR  X0,[X0,#0xED0] = heap block base (was MOV W1,#0x100000)
 0015353C 02CEA9D2   // MOVZ X2,#0x4E70,LSL#16 (was MOV X2,X21)
 00153544 0000028B   // ADD  X0,X0,X2 (was BL mspace_memalign)
+// Handheld render scale. Booting in handheld picks 1280/width, while a
+// dock/undock switch picks 0.8, so the two disagree once the width moves.
+// Pin the boot constant to 1536.0 = 0.8 x 1920 so handheld is 80% either way.
+001CA5CC 0898A852   // MOVZ W8,#0x44C0,LSL#16 = 1536.0f (was 1280.0f)
 @stop
 
 // Offsets reverse-engineered against Metroid Dread 2.1.0 (MercurySteam engine,
