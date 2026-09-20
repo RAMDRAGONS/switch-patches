@@ -1,0 +1,49 @@
+@nsobid-FF773E90972D544EB79406EAA65396D53C43EFB9
+
+# Super Mario Bros. Wonder 1.2.1 - 3840x2160 docked, 2560x1440 handheld
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Renders and scans out at 3840x2160 docked and 2560x1440 handheld.
+//
+// Two sizes have to move together. The sead::GameFrameworkNx CreateArg in
+// nnMain sets the nn::vi layer and the NVN window textures, i.e. the surface
+// that is presented; raising it alone leaves the scene drawn at native size
+// in the top-left corner. The scene size comes from the graphics task's
+// mode-change path, which picks a height per operation mode, derives the
+// width as height * 16 / 9, and publishes the pair to the render-size field
+// the render targets are allocated from. Patching the two heights moves the
+// render and its viewport; the width follows on its own.
+//
+// That published pair packs the height into an 11-bit field, so it tops out
+// at 2047 and 2160 would wrap to 112. The BFI that builds it is widened to
+// 12 bits here. Nothing else reads the neighbouring bits: the field is the
+// high half of a 64-bit word whose upper 32 bits hold only this height.
+//
+// Every gsys render target, including the cascaded shadow map, is carved
+// from the heap named DynamicTextureAllocatorMem, whose size lives in romfs
+// rather than in the executable. This mod therefore also ships
+// romfs/System/HeapSize/Product.Nin_NX_NVN.HeapDef.byml.zs with that heap,
+// its Graphics parent and VirtualAddressMemory raised fourfold, matching the
+// pixel increase over stock. Install the exefs and romfs halves together.
+//
+// Set Ryujinx > System > DRAM Size to 8 GiB for this resolution.
+
+@enabled
+// Window size in the sead::GameFrameworkNx CreateArg (nnMain), was 1920x1080.
+005B7F04 08E0C1F2   // MOVK X8,#0xF00,LSL#32 (width)
+005B7F10 080E8152   // MOVZ W8,#0x870        (height)
+// Render heights in the graphics task's operation-mode path. The width is
+// computed from these as height * 16 / 9 and packed into the render size.
+00781EC4 0B0E8152   // MOVZ W11,#0x870 (docked, was 1080)
+00781EE0 0AB48052   // MOVZ W10,#0x5A0 (handheld, was 720)
+// Widen the packed render size's height field from 11 bits to 12 so 2160 fits.
+00781F80 0D2D60B3   // BFI X13,X8,#0x20,#0xC (was #0xB)
+@stop
+
+// Resolution sites by theboy181 and Fl4sh_, ported from their 1.0.1 2K mod
+// and re-verified against 1.2.1. The 11-bit field widening is needed only
+// above 2047 and was derived here; every site was byte-checked in the IDB.
+//
+// https://github.com/RAMDRAGONS/switch-patches

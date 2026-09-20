@@ -1,0 +1,41 @@
+@nsobid-FF773E90972D544EB79406EAA65396D53C43EFB9
+
+# Super Mario Bros. Wonder 1.2.1 - 2048x2048 depth shadow map
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces the sun cascade shadow map to 2048x2048 so shadow edges stop
+// being blocky.
+//
+// The size is not a constant: gsys::ModelSceneConfig exposes it as the
+// env parameters depth_shadow_tex_width / _height, and the in-code
+// defaults are placeholders (1024 and the sentinel -1), so each stage's
+// env archive supplies the real values. The per-frame shadow draw then
+// scales the configured size by the viewport ratio and takes a minimum,
+// which only ever shrinks it, so raising the render resolution alone
+// changes nothing.
+//
+// Overwriting the two config reads with immediates sidesteps both: the
+// minimum keeps the immediate exactly for any viewport at or above the
+// reference size, and the result is the same in every stage.
+//
+// The shadow map is a cascade texture array allocated per frame from the
+// agl::utl::DynamicTextureAllocator pool, and cost scales with the square
+// of the size, so 2048 is 4x the memory of the 1024 default. The
+// stock 96 MB pool can run out on its own; install one of the resolution
+// mods alongside this, which raise that pool. Do not duplicate the pool
+// offset here.
+
+@enabled
+// gsys::ModelSceneConfig::depth_shadow_tex_width / _height reads in the
+// per-frame depth shadow draw.
+0011694C 0C008152   // MOVZ W12,#2048 (was LDR W12,[X8,#0x16A8])
+00116970 08008152   // MOVZ W8,#2048  (was LDR W8,[X8,#0x16C8])
+@stop
+
+// Offsets reverse-engineered against Super Mario Bros. Wonder 1.2.1
+// (sead + agl/gsys, NVN). The retail build is symbol-stripped, so both
+// sites were located by structure and byte-verified against the IDB.
+//
+// https://github.com/RAMDRAGONS/switch-patches

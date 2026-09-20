@@ -1,0 +1,44 @@
+@nsobid-FF773E90972D544EB79406EAA65396D53C43EFB9
+
+# Super Mario Bros. Wonder 1.2.1 - 2560x1440 docked, 1920x1080 handheld
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Renders and scans out at 2560x1440 docked and 1920x1080 handheld.
+//
+// Two sizes have to move together. The sead::GameFrameworkNx CreateArg in
+// nnMain sets the nn::vi layer and the NVN window textures, i.e. the surface
+// that is presented; raising it alone leaves the scene drawn at native size
+// in the top-left corner. The scene size comes from the graphics task's
+// mode-change path, which picks a height per operation mode, derives the
+// width as height * 16 / 9, and publishes the pair to the render-size field
+// the render targets are allocated from. Patching the two heights moves the
+// render and its viewport; the width follows on its own.
+//
+// Every gsys render target, including the cascaded shadow map, is carved
+// from the heap named DynamicTextureAllocatorMem, whose size lives in romfs
+// rather than in the executable. This mod therefore also ships
+// romfs/System/HeapSize/Product.Nin_NX_NVN.HeapDef.byml.zs with that heap,
+// its Graphics parent and VirtualAddressMemory doubled. Install the exefs
+// and romfs halves together; the exefs half alone will run out of texture
+// memory and dereference the allocator's null result.
+//
+// The sead root heap is sized from nn::os::QueryMemoryInfo at boot, so it
+// absorbs the larger graphics heaps. The default 4 GiB DRAM Size is enough.
+
+@enabled
+// Window size in the sead::GameFrameworkNx CreateArg (nnMain), was 1920x1080.
+005B7F04 0840C1F2   // MOVK X8,#0xA00,LSL#32 (width)
+005B7F10 08B48052   // MOVZ W8,#0x5A0        (height)
+// Render heights in the graphics task's operation-mode path. The width is
+// computed from these as height * 16 / 9 and packed into the render size.
+00781EC4 0BB48052   // MOVZ W11,#0x5A0 (docked, was 1080)
+00781EE0 0A878052   // MOVZ W10,#0x438 (handheld, was 720)
+@stop
+
+// Resolution sites by theboy181 and Fl4sh_, ported from their 1.0.1 mod and
+// re-verified against 1.2.1: both pairs were relocated by structure in the
+// IDB and byte-checked before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches
