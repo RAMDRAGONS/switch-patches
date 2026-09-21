@@ -1,0 +1,45 @@
+@nsobid-F19B2E01E1794F933A9720C1404BB6F6
+
+# Bayonetta 2 1.2 - 2048x2048 shadow resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Sharpens the sun shadow. The engine renders two 1024x1024 cascades into one
+// 1024x2048 depth atlas, stacked vertically; it becomes a 2048x4096 atlas of two
+// 2048x2048 cascades. The colour target bound with the atlas during the caster
+// pass is resized to match.
+//
+// The caster pass places each cascade with an explicit viewport, cascade 0 at
+// y = 0 and cascade 1 at y = one cascade height. Those viewports scale with the
+// atlas, so each cascade stays the same fraction of it, which is what the
+// receiver shaders sample by. Nothing else hardcodes the size: the sampling
+// view is created from the same constants patched here.
+//
+// REQUIRES one of the [WxH] resolution mods. The shadow textures live in the
+// same fixed render-target pool as the G-buffers and grow it by about 48 MB,
+// which the stock 128 MB pool cannot absorb. The resolution mods own that pool
+// and already size it for this mod; do NOT copy their offsets here.
+
+@enabled
+// Cascade atlas depth texture and its sampling view, 1024x2048 -> 2048x4096.
+0097D0AC 01008152   // MOVZ W1,#2048 (was 1024)
+0097D0B0 02008252   // MOVZ W2,#4096 (was 2048)
+0097D0D4 02008152   // MOVZ W2,#2048 (was 1024)
+0097D0E0 03008252   // MOVZ W3,#4096 (was 2048)
+// Colour target bound alongside the atlas in the caster pass.
+0097DFE4 01008152   // MOVZ W1,#2048 (was 1024)
+0097DFE8 02008252   // MOVZ W2,#4096 (was 2048)
+// Per-cascade viewport in the caster pass.
+0097814C 01008152   // cascade 1 y offset (was 1024)
+00978154 02008152   // cascade 1 width  (was 1024)
+00978158 03008152   // cascade 1 height (was 1024)
+00978168 02008152   // cascade 0 width  (was 1024)
+00978170 03008152   // cascade 0 height (was 1024)
+@stop
+
+// Offsets reverse-engineered against Bayonetta 2 1.2 (PlatinumGames "Hw"
+// framework, PRJ_010, NVN). The retail build is symbol-stripped; every site was
+// located by structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

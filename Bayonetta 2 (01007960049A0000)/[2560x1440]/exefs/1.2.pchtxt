@@ -1,0 +1,135 @@
+@nsobid-F19B2E01E1794F933A9720C1404BB6F6
+
+# Bayonetta 2 1.2 - 2560x1440 resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Renders at 2560x1440 instead of the stock 1280x720. The game uses the same
+// size docked and handheld, so the mod holds in both modes.
+//
+// The engine has one display size (the NVN window textures and the backbuffer
+// viewport) and one scene size, which is passed to the two startup functions
+// that build every render target. Most targets are sized from those arguments,
+// but the rest of the post-process chain is hardcoded: a full-size target,
+// three half-size targets, nine quarter-size targets and two 800x450 views.
+// All of them are scaled by the same ratio so every buffer keeps its stock
+// proportion to the frame. Binding a target sets the viewport and scissor to
+// that target's own size, so no draw code needs to change.
+//
+// Bayonetta 2 also builds a three-step horizontal dynamic-resolution ladder
+// (1280, 1024 and 800 wide, all 720 tall) as views into the full-size targets.
+// Nothing in retail selects another step, but all three are pinned to 2560 so
+// the resolution cannot drop if one is ever selected.
+//
+// The 2D layer (HUD, menus, fades, vignette and screen filters) is authored
+// in a fixed 1280x720 space and asks the engine for the display size to build
+// its projection. That size is pinned to 1280x720 so 2D elements fill the
+// screen; the few blits that need the real pixel size are redirected to new
+// getters that return it.
+//
+// REQUIRES Ryujinx > System > DRAM Size set to 6 GiB or higher. Every render
+// target, including the swap-chain textures, comes out of two fixed GPU pools
+// (128 MB and 64 MB) carved from a 1536 MB "GRAPHIC" heap inside a 2913 MB
+// root heap. Both pools are enlarged for the 2560x1440 targets, and each parent
+// heap grows by exactly the same amount so its stock headroom is unchanged:
+// 640 MB and 128 MB pools, 2112 MB GRAPHIC heap, 3489 MB root heap. The root
+// heap is malloc'd from nn::os::SetMemoryHeapSize(all remaining memory) and
+// so follows the emulator's DRAM setting.
+//
+// The render-target pool also reserves room for the [Shadow Resolution 4096]
+// mod. This mod OWNS the pool and heap offsets below; do not duplicate them in
+// another enabled mod.
+
+@enabled
+// Display size (NVN window textures and the backbuffer viewport).
+0097B880 08B4C0D2   // MOVZ X8,#1440,LSL#32 (was 720)
+0097B884 084081F2   // MOVK X8,#2560 (was 1280)
+// Scene size handed to the two render-target builders.
+0097B9FC 00408152   // shadow/depth set width  (was 1280)
+0097BA00 01B48052   // shadow/depth set height (was 720)
+0097BA0C 00408152   // main set width  (was 1280)
+0097BA10 01B48052   // main set height (was 720)
+// Full-size target that the dynamic-resolution views alias.
+0097D29C 19408152   // width  (was 1280)
+0097D2A4 02B48052   // height (was 720)
+// Half-size targets (640x360 at stock).
+0097D2D0 01A08052   // width  (was 640)
+0097D2D4 025A8052   // height (was 360)
+0097D2FC 01A08052   // width  (was 640)
+0097D300 025A8052   // height (was 360)
+0097D328 01A08052   // width  (was 640)
+0097D32C 025A8052   // height (was 360)
+// Quarter-size post-process chain (320x180 at stock).
+0097D354 01508052   // width  (was 320)
+0097D358 022D8052   // height (was 180)
+0097D380 01508052   // width  (was 320)
+0097D384 022D8052   // height (was 180)
+0097D3A8 01508052   // width  (was 320)
+0097D3AC 022D8052   // height (was 180)
+0097D3D0 01508052   // width  (was 320)
+0097D3D4 022D8052   // height (was 180)
+0097D3F8 01508052   // width  (was 320)
+0097D3FC 022D8052   // height (was 180)
+0097D420 01508052   // width  (was 320)
+0097D424 022D8052   // height (was 180)
+0097D448 01508052   // width  (was 320)
+0097D44C 022D8052   // height (was 180)
+0097D498 01508052   // width  (was 320)
+0097D49C 022D8052   // height (was 180)
+0097D4C0 01508052   // width  (was 320)
+0097D4C4 022D8052   // height (was 180)
+// 800x450 views (0.625 of the frame).
+0097DA8C 02C88052   // width  (was 800)
+0097DA98 83708052   // height (was 450)
+0097DAC4 02C88052   // width  (was 800)
+0097DAC8 83708052   // height (was 450)
+// Dynamic-resolution ladder widths, steps 1 and 2 (step 0 is the
+// full-size width above).
+0097DBA4 08408152   // step 1 width (was 1024)
+0097DBB0 09408152   // step 2 width (was 800)
+// Render-target memory pool, was 128 MB: alloc, pool size, allocator size.
+00DC21F4 0100A552   // 640 MB
+00DC2204 1600A552   // 640 MB
+00DC2234 0700A552   // 640 MB
+// Image-target memory pool, was 64 MB: alloc, pool size, allocator size.
+00DC20BC 0100A152   // 128 MB
+00DC20CC 1600A152   // 128 MB
+00DC211C 0700A152   // 128 MB
+// GRAPHIC heap that both pools are carved from, was 1536 MB.
+0096B340 0180B052   // 2112 MB
+// ALL RESOURCE root heap around it, was 2913 MB.
+0096B008 0042BB52   // 3489 MB
+// 2D canvas. The display-size getters are the 2D layer's coordinate space:
+// UI projections, full-screen overlays and screen-space UVs all divide by
+// them while their geometry is authored in 1280x720 units. Pin both getters
+// to 1280x720 so the 2D layer stretches across the real display.
+00DC4F34 00A08052   // canvas width:  MOVZ W0,#1280 (was LDR W0,[X8])
+00DC4F44 005A8052   // canvas height: MOVZ W0,#720  (was LDR W0,[X8])
+// Real display-size getters for the few callers that measure pixels, placed
+// over _fini, which the game never calls (process exit only).
+00000160 08A80190   // ADRP X8, display size page
+00000164 006149B9   // LDR  W0,[X8,#0x960] = real width
+00000168 C0035FD6   // RET
+0000016C 08A80190   // ADRP X8, display size page
+00000170 006549B9   // LDR  W0,[X8,#0x964] = real height
+00000174 C0035FD6   // RET
+// Pixel users: backbuffer size cache, full-screen blits scaled against the
+// bound target, and the target-equals-screen test before a copy.
+00976D20 1025DA97   // BL real width  (frame start, target size cache)
+00976D28 1125DA97   // BL real height
+0097722C CD23DA97   // BL real width  (final blit)
+00977234 CE23DA97   // BL real height
+00977380 7823DA97   // BL real width  (post blits)
+00977388 7923DA97   // BL real height
+00979ED0 A418DA97   // BL real width  (composite)
+00979ED8 A518DA97   // BL real height
+00EB41E4 DF2FC597   // BL real width  (screen copy test)
+00EB41EC E02FC597   // BL real height
+@stop
+
+// Offsets reverse-engineered against Bayonetta 2 1.2 (PlatinumGames "Hw"
+// framework, PRJ_010, NVN). The retail build is symbol-stripped; every site was
+// located by structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

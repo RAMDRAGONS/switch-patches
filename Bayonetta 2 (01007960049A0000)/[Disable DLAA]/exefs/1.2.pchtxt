@@ -1,0 +1,29 @@
+@nsobid-F19B2E01E1794F933A9720C1404BB6F6
+
+# Bayonetta 2 1.2 - Disable DLAA
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Disables the post-process anti-aliasing pass. Bayonetta 2 has no FXAA or
+// SMAA; its post AA is DLAA, run as the FilterShaderDLAA1 (edge detection) and
+// FilterShaderDLAA2 (blend) passes after the final composite.
+//
+// One graphics flag bit decides whether they run. When it is clear, the frame
+// function draws the composite straight to the output and returns; when it is
+// set, it draws the same composite and then the two DLAA passes on top.
+// Removing the bit test makes every frame take the first path, so the output
+// is the engine's own no-AA image rather than a new code path.
+//
+// This patches the frame code, not the flag, so scene settings that set the
+// bit cannot turn it back on.
+
+@enabled
+00979EFC 1F2003D5   // NOP (was TBNZ W8,#1 = the DLAA enable bit)
+@stop
+
+// Offsets reverse-engineered against Bayonetta 2 1.2 (PlatinumGames "Hw"
+// framework, PRJ_010, NVN). The retail build is symbol-stripped; every site was
+// located by structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

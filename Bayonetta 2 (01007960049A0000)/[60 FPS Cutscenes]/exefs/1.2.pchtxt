@@ -1,0 +1,34 @@
+@nsobid-F19B2E01E1794F933A9720C1404BB6F6
+
+# Bayonetta 2 1.2 - 60 FPS cutscenes
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Runs real-time cutscenes at 60 FPS instead of 30 FPS, at normal speed.
+//
+// Gameplay already runs at 60 FPS. Cutscenes raise a "30 FPS" request bit,
+// and the main loop answers it in one place: it sets the NVN present interval
+// to 2 and hands the frame timer a fixed step of 2.0 (the timer counts in
+// 60 Hz frames). In gameplay the same loop leaves the interval at 1 and lets
+// the timer measure the real frame time, clamped to 1.0 to 2.0.
+//
+// Removing the bit test sends cutscenes down the gameplay path, so the present
+// interval and the frame step change together. That is why this does not run
+// cutscenes at double speed: nothing is left forcing a 2.0 step per 60 Hz
+// frame, and a scene that cannot hold 60 FPS still slows down the measured
+// step instead of the playback speed.
+//
+// The request bit itself is left set, so everything else that reacts to it
+// (voice suppression, camera and cutscene-only settings) behaves as stock.
+// Pre-rendered movies are unaffected.
+
+@enabled
+0099146C 1F2003D5   // NOP (was TBNZ X8,#37 = the 30 FPS request test)
+@stop
+
+// Offsets reverse-engineered against Bayonetta 2 1.2 (PlatinumGames "Hw"
+// framework, PRJ_010, NVN). The retail build is symbol-stripped; every site was
+// located by structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches
