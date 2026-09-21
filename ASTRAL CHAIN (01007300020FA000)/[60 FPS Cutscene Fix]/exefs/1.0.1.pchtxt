@@ -1,0 +1,41 @@
+@nsobid-4B159F0F7A360669738390EE8657B4F0
+
+# ASTRAL CHAIN 1.0.1 - 60 FPS cutscene fix
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Keeps cutscenes and other frame-stepped animation at normal speed at 60 FPS.
+//
+// Once per frame the game converts elapsed time into a step measured in 30 Hz
+// frames (sub_710091DBB0, scale = 30 / 1000 ms). A step under 1.0 is rounded
+// up to 1.0 and the difference carried as a debt against the next frame. At
+// 30 FPS that only smooths jitter; at 60 FPS every frame measures 0.5, the debt
+// saturates, and the step stays pinned at 1.0, so everything using it runs at
+// double speed. The rounding floor, the debt base and the value written are
+// moved from 1.0 to 0.5, one 60 Hz frame. The 2.0 ceiling stays as the hitch
+// guard.
+//
+// When the engine's fixed-step flag is set the loop skips the measurement and
+// writes the step it was passed instead. That argument is loaded once before
+// the main loop and is lowered to 0.5 as well.
+//
+// REQUIRES [60 FPS].
+
+@enabled
+// Frame-step quantiser.
+0091DC94 01102C1E   // FMOV S1,#0.5 (was 1.0) = rounding threshold
+0091DCA0 01102C1E   // FMOV S1,#0.5 (was 1.0) = debt base
+0091DCAC 08E0A752   // MOVZ W8,#0x3F00,LSL#16 = 0.5f (was 1.0f) = rounded step
+// Fixed step passed in by the main loop.
+003E397C 08102C1E   // FMOV S8,#0.5 (was 1.0)
+@stop
+
+// Frame-step fix by MrComputerRevo
+// (https://gbatemp.net/threads/astral-chain-rom-hacking-bible.547050/post-8777070)
+// and masagrator (https://github.com/masagrator), packaged by StevensND
+// (https://github.com/StevensND/switch-port-mods). The fixed-step path is
+// patched at its argument instead of dropping the store; re-verified against
+// 1.0.1 and byte-verified against the IDB.
+//
+// https://github.com/RAMDRAGONS/switch-patches

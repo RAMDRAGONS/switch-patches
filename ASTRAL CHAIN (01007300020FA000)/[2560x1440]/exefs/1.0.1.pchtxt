@@ -1,0 +1,63 @@
+@nsobid-4B159F0F7A360669738390EE8657B4F0
+
+# ASTRAL CHAIN 1.0.1 - 2560x1440 resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Renders at 2560x1440 instead of the stock docked 1600x900.
+//
+// The engine takes its size from two leaf getters, one per dock state, and
+// feeds the same pair into three places: the NVN window texture plus its crop
+// rectangle, the renderer's boot-time target set, and the target set that is
+// rebuilt on every dock/undock. All three are moved together, and both dock
+// states get the same size, so the mod holds whichever mode the game starts in.
+//
+// Astral Chain also ships a three-step dynamic-resolution ladder (1600x900,
+// 1440x810, 1280x810 docked) that the frame pacer walks down under load. Each
+// step is a set of sub-rect views into the full-size targets, so the ladder can
+// only ever shrink the image. All three steps are pinned to 2560x1440, which
+// both applies the new resolution and stops the game dropping below it.
+//
+// REQUIRES Ryujinx > System > DRAM Size set to 6 GiB or higher. Every render
+// target, including the swap-chain textures, comes out of a fixed 310 MB
+// "FrameHeap", so that heap is scaled by the 2.56x pixel ratio to 896 MB. The app
+// heap around it is nn::os::SetMemoryHeapSize(all remaining memory) and so
+// follows the emulator's DRAM setting; only the FrameHeap slice is hardcoded.
+//
+// The FrameHeap size leaves room for the [Shadow Resolution 4096] mod. This mod
+// OWNS the FrameHeap offset below; do not duplicate it in another enabled mod.
+
+@enabled
+// Display-size getters: NVN window texture size and nvnWindowSetCrop rectangle.
+004328C0 08408152   // docked width  (was 1600)
+004328C8 08B48052   // docked height (was 900)
+004328E0 08408152   // handheld width  (was 1280)
+004328E8 08B48052   // handheld height (was 720)
+// Renderer boot: sizes the G-buffer, post-process and shadow-receive targets.
+0040D5E0 08408152   // handheld width  (was 1280)
+0040D5E4 09408152   // docked width    (was 1600)
+0040D5EC 08B48052   // handheld height (was 720)
+0040D5F0 09B48052   // docked height   (was 900)
+// Same pair again in the dock/undock handler that recreates those targets.
+0040FB00 08408152   // handheld width  (was 1280)
+0040FB04 09408152   // docked width    (was 1600)
+0040FB10 08B48052   // handheld height (was 720)
+0040FB14 09B48052   // docked height   (was 900)
+// Dynamic-resolution ladder, three steps. Each CSEL picked a docked or handheld
+// value off the stock ladder; replacing it with an immediate pins the step.
+0040F18C 01408152   // step 0 width  (was 1600 / 1280)
+0040F190 02B48052   // step 0 height (was  900 /  720)
+0040F1B8 01408152   // step 1 width  (was 1440 / 1024)
+0040F1BC 02B48052   // step 1 height (was  810 /  630)
+0040F1D8 01408152   // step 2 width  (was 1280 /  800)
+0040F1DC 02B48052   // step 2 height (was  810 /  630)
+// Render-target heap ("FrameHeap"), was 310 MB.
+0040E0B0 0800A752   // MOVZ W8,#0x3800,LSL#16 -> 896 MB
+@stop
+
+// Offsets reverse-engineered against ASTRAL CHAIN 1.0.1 (PlatinumGames "Hw"
+// framework, PRJ_036, NVN). The retail build is symbol-stripped; every site was
+// located by structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

@@ -1,0 +1,43 @@
+@nsobid-4B159F0F7A360669738390EE8657B4F0
+
+# ASTRAL CHAIN 1.0.1 - 4096x4096 shadow resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Doubles the sun shadow map. The engine keeps one 2048x2048 atlas holding four
+// 1024x1024 cascades; it becomes a 4096x4096 atlas of four 2048x2048 cascades.
+// The downsampled copy the lighting pass reads when the full-quality receiver
+// is off is half the atlas, so it goes 1024 -> 2048 with it.
+//
+// The shadow-cast pass places each cascade by index: x = (i & 1) * tile,
+// y = ((i >> 1) & 1) * tile. Both shifts move up one bit so the four cascades
+// still tile the atlas exactly, and the cascade stays the same fraction of the
+// atlas, which is what the receiver shaders sample by. Nothing else hardcodes
+// the size: the light's viewport is taken from these values and the atlas is
+// created from the same constant.
+//
+// REQUIRES one of the [WxH] resolution mods. The shadow textures live in the
+// same fixed "FrameHeap" as the G-buffers and grow it by about 60 MB, which the
+// stock 310 MB heap cannot absorb. The resolution mods own that heap and
+// already size it for this mod; do NOT copy their offset here.
+
+@enabled
+// Shadow atlas texture and its full-atlas view, 2048x2048 -> 4096x4096.
+0040E1EC 08008252   // MOVZ W8,#4096 (was 2048)
+0040E4E4 08008252   // MOVZ W8,#4096 (was 2048)
+// Downsampled half-size copy of the atlas, 1024x1024 -> 2048x2048.
+0040EB78 08008152   // MOVZ W8,#2048 (was 1024)
+// Per-cascade viewport in the shadow-cast pass.
+00401FA8 03008152   // MOVZ W3,#2048 (was 1024) = viewport width
+00401FAC 04008152   // MOVZ W4,#2048 (was 1024) = viewport height
+00401FB0 01011553   // UBFIZ W1,W8,#11,#1 (was #10) = x offset
+00401FB4 08551653   // LSL   W8,W8,#10   (was #9)
+00401FB8 02011512   // AND   W2,W8,#0x800 (was #0x400) = y offset
+@stop
+
+// Offsets reverse-engineered against ASTRAL CHAIN 1.0.1 (PlatinumGames "Hw"
+// framework, PRJ_036, NVN). The retail build is symbol-stripped; every site was
+// located by structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

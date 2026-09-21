@@ -1,0 +1,35 @@
+@nsobid-4B159F0F7A360669738390EE8657B4F0
+
+# ASTRAL CHAIN 1.0.1 - 60 FPS
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Presents every vsync (60 FPS) instead of every second vsync (30 FPS).
+//
+// The engine keeps a vsync mode that it maps to an NVN present interval
+// (mode 0 -> 1, mode 1 -> 2, anything else -> 0) in exactly two places: once
+// on the window builder at boot and again in the per-frame apply that runs
+// when the mode changes. The main loop re-requests mode 1 every frame. Both
+// mappings end in the CSINC that produces the interval right before the NVN
+// call, so that instruction is replaced with a constant 1.
+//
+// The mode itself is left at 1 on purpose. It also drives a frames-to-seconds
+// helper used across the game (n/30 at mode 1, n/60 at mode 0), and the game's
+// content is authored in 30 Hz frames, so switching the mode would halve those
+// durations. Only the interval handed to NVN changes.
+//
+// Use with [60 FPS Cutscene Fix], or cutscenes and other frame-stepped
+// animation run at double speed.
+
+@enabled
+009E8D84 21008052   // MOVZ W1,#1 (was CSINC W1,W8,WZR,NE) = nvnWindowBuilderSetPresentInterval
+009DB6BC 21008052   // MOVZ W1,#1 (was CSINC W1,W9,WZR,NE) = nvnWindowSetPresentInterval
+@stop
+
+// 60 FPS method by StevensND (https://github.com/StevensND/switch-port-mods),
+// which forces android::Surface::setSwapInterval to 1 in the sdk module.
+// Moved into main against 1.0.1 so it only affects the game's own window and
+// shares a build id with the other mods; byte-verified against the IDB.
+//
+// https://github.com/RAMDRAGONS/switch-patches
