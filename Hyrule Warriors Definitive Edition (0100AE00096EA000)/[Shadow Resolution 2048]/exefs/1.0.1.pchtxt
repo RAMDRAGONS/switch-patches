@@ -1,0 +1,33 @@
+@nsobid-815A2C19D176789688FF33EA875C26C5
+
+# Hyrule Warriors: Definitive Edition 1.0.1 - 2048 shadow resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Raises each sun-shadow cascade from 1024x1024 to 2048x2048 (512x512 to
+// 1024x1024 per player in split-screen). The game renders two cascades
+// into one 16-bit depth texture stacked vertically, and lays the cascade
+// viewports out from that texture's size, so only the allocation changes.
+//
+// The single-player map grows to 2048x4096 (16 MB). It comes out of
+// the same fixed GPU pool as the screen targets, so use it together with a
+// resolution mod, which enlarges that pool; this mod does not touch the pool
+// offsets.
+
+@enabled
+// Split-screen: one map per player, two cascades stacked vertically.
+003E1408 01808052   // MOVZ W1,#1024 (was 512)
+003E140C 02008152   // MOVZ W2,#2048 (was 1024)
+003E1474 01808052   // MOVZ W1,#1024 (was 512)
+003E1478 02008152   // MOVZ W2,#2048 (was 1024)
+// Single player: one map, two cascades stacked vertically.
+003E14CC 01008152   // MOVZ W1,#2048 (was 1024)
+003E14D0 02008252   // MOVZ W2,#4096 (was 2048)
+@stop
+
+// Offsets reverse-engineered against Hyrule Warriors: Definitive Edition 1.0.1
+// (Koei Tecmo KTGL, NVN). The retail build is symbol-stripped; every site was
+// located by structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

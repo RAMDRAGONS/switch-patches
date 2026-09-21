@@ -1,0 +1,41 @@
+@nsobid-815A2C19D176789688FF33EA875C26C5
+
+# Hyrule Warriors: Definitive Edition 1.0.1 - 60 FPS cutscenes
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Runs real-time (in-engine) cutscenes at 60 FPS instead of 30 FPS, at
+// normal speed.
+//
+// The game has no present-interval switch for these scenes. Its main loop is
+// paced by a sleep limiter that waits "step" 1/59.83 s ticks per update, and
+// one setter writes the step together with the matching frames-per-second
+// int and float that the rest of the engine reads. Gameplay runs with step 1.
+// Starting an event saves the current step and calls the setter with 2; the
+// end of the event restores the saved value.
+//
+// This makes the event start request step 1 instead. Event animation, script
+// timers and the rest of the scene advance by the step each update, so they
+// take twice as many updates of half the size and play at the same speed.
+// Nothing else changes: the step is restored on exit exactly as stock.
+//
+// Cutscenes that play inside a battle scene also pass through the battle
+// update, which overwrites the event playback rate with a constant 1.0 every
+// update. At stock that equals the event path's own value (step 2 x 0.5), but
+// at step 1 it would double their speed, so the constant becomes 0.5. The
+// rate is only read while an event is playing.
+//
+// Pre-rendered movies are unaffected; they play through a separate player
+// that keeps its own 30 FPS present interval.
+
+@enabled
+00252FA4 20008052   // MOVZ W0,#1 = step 1 (was ORR W0,WZR,#2 = step 2 on event start)
+00172FA4 09E0A752   // MOVZ W9,#0x3F00,LSL#16 = 0.5f event rate (was 1.0f)
+@stop
+
+// Offsets reverse-engineered against Hyrule Warriors: Definitive Edition 1.0.1
+// (Koei Tecmo KTGL, NVN). The retail build is symbol-stripped; every site was
+// located by structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

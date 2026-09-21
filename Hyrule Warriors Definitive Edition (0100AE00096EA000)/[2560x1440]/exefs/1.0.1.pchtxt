@@ -1,0 +1,179 @@
+@nsobid-815A2C19D176789688FF33EA875C26C5
+
+# Hyrule Warriors: Definitive Edition 1.0.1 - 2560x1440 resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Renders at 2560x1440 instead of the stock 1920x1080. The game uses the same
+// size docked and handheld, so the mod holds in both modes.
+//
+// The engine has one packed 1920x1080 for the NVN window textures and the back
+// buffer, and a four-slot size table that every full-size scene target and the
+// per-player camera viewports are built from. Both are raised to 2560x1440.
+//
+// The global screen-size getters are the 2D layer's 1920x1080 coordinate
+// space: HUD, menus, text and screen-space effects are authored in it and
+// divide by it. They stay at 1920x1080, and the 2D draw path is scaled by
+// real/1920 for the UI so it fills the screen; the layout scissor, sprite clip
+// rects and the positions of world-space markers are converted to match. The few callers that need
+// pixels (explicit viewports, the half-size effect targets, the split-screen
+// ratio and camera viewports) call new getters that return the real size.
+//
+// Shadow cascades are laid out from the shadow texture size, so the
+// [Shadow Resolution] mods need no change here.
+//
+// Works with Ryujinx > System > DRAM Size at the default 4 GiB. If boot fails,
+// use 8 GiB, not 6 GiB: above 4 GiB the game keeps 1.75 GiB out of its own
+// heap, so 6 GiB leaves it less room than 4 GiB.
+//
+// Every render target comes out of a fixed 1024 MB GPU pool inside a 1945 MB
+// graphics block inside a 1950 MB root heap. All three grow by the same
+// 384 MB so their stock headroom is unchanged; the extra covers the
+// full-size targets at 2560x1440 plus the [Shadow Resolution 4096] mod. The
+// root heap is malloc'd from nn::os::SetMemoryHeapSize(all remaining memory).
+// This mod OWNS the pool and heap offsets below; do not duplicate them in
+// another enabled mod.
+
+@enabled
+// Swap chain (NVN window textures) and back buffer.
+002ABF60 084081D2   // MOVZ X8,#2560 (was ORR X8,XZR,#0x78000000780)
+002ABF6C 08B4C0F2   // MOVK X8,#1440,LSL#32 (was 1080)
+// Scene target size table (four slots) and the first scene target set.
+003DFFBC 154081D2   // MOVZ X21,#2560 (was ORR X21,XZR,#0x78000000780)
+003DFFC0 15B4C0F2   // MOVK X21,#1440,LSL#32 (was 1080)
+003E0028 08408152   // MOVZ W8,#2560 (was 1920)
+003E002C 09B48052   // MOVZ W9,#1440 (was 1080)
+// Real frame-size getters over _fini, which only runs at process exit.
+00000160 00408152   // MOVZ W0,#2560
+00000164 C0035FD6   // RET
+00000168 00B48052   // MOVZ W0,#1440
+0000016C C0035FD6   // RET
+// Begin2D wrappers. 2D draws map coordinates through the viewport size times
+// a per-device scale that is always 1.0 at stock; the canvas wrapper sets it
+// to real/1920 so 1920x1080 UI coordinates span the whole target, the pixel
+// wrapper restores 1.0 for blits and copies that pass real pixel rects.
+00000170 695595D2   // canvas: MOVZ X9,#lo
+00000174 49F5A7F2   // MOVK X9,LSL#16
+00000178 6955D5F2   // MOVK X9,LSL#32
+0000017C 49F5E7F2   // MOVK X9,LSL#48 = 1.3333f x2
+00000180 09C014F9   // STR X9,[X0,#0x2980]
+00000184 43BA1414   // B Begin2D
+00000188 E91B09B2   // pixel: MOV X9,#0x3F8000003F800000 (1.0f x2)
+0000018C 09C014F9   // STR X9,[X0,#0x2980]
+00000190 40BA1414   // B Begin2D
+// Begin2D callers in the UI sprite system (1920x1080 canvas coordinates).
+001DF21C D583F897   // BL canvas Begin2D (sprite layer flush)
+001DF3A4 7383F897   // BL canvas Begin2D (sprite layer flush)
+001DF404 5B83F897   // BL canvas Begin2D (sprite layer flush)
+001E324C C973F897   // BL canvas Begin2D (sprite list draw)
+002D5428 52ABF497   // BL canvas Begin2D (full-canvas overlay)
+001E454C 096FF817   // B canvas Begin2D (sprite begin)
+// Begin2D callers that pass real pixel rects (blits, copies, effect passes).
+0023D2D0 AE0BF797   // BL pixel Begin2D
+002ACBE4 694DF597   // BL pixel Begin2D
+002ACCA0 3A4DF597   // BL pixel Begin2D
+003AB958 0C52F197   // BL pixel Begin2D
+003C81D4 EDDFF097   // BL pixel Begin2D
+003CF918 1CC2F097   // BL pixel Begin2D
+0051EE68 C884EB97   // BL pixel Begin2D
+0052FD90 FE40EB97   // BL pixel Begin2D
+005302F8 A43FEB97   // BL pixel Begin2D
+00576410 5E27EA97   // BL pixel Begin2D
+005776AC B722EA97   // BL pixel Begin2D
+005CDA58 CCC9E897   // BL pixel Begin2D
+005CDB30 96C9E897   // BL pixel Begin2D
+// Layout (bflyt) scissor, recorded into the UI command buffer in pixels.
+001E19A8 0840C1D2   // MOVZ X8,#2560,LSL#32 (x=0, w=2560)
+001E19B0 08B48052   // MOVZ W8,#1440 (h)
+// Sprite clip rects are 1920x1080 canvas units but are applied as a pixel
+// scissor. Load them through a scaling routine instead of copying them.
+001F1B14 91B40C94   // BL scale sprite scissor rect
+001F1B18 1F2003D5   // NOP
+001F1B1C 1F2003D5   // NOP
+001F1B20 1F2003D5   // NOP
+// The routine lives in the KTGL version overlay, which only draws when a
+// debug font is installed. Skip the overlay call so its body is free.
+0051ECC0 03000014   // B past the debug overlay (was CBZ)
+0051ED58 692A4229   // LDP W9,W10,[X19,#0x10] (x,y)
+0051ED5C 6B324329   // LDP W11,W12,[X19,#0x18] (w,h)
+0051ED60 6D008052   // MOVZ W13,#3
+0051ED64 29751E53   // LSL W9,W9,#2
+0051ED68 290DCD1A   // SDIV W9,W9,W13 (x4/3)
+0051ED6C 4A751E53   // LSL W10,W10,#2
+0051ED70 4A0DCD1A   // SDIV W10,W10,W13 (x4/3)
+0051ED74 6B751E53   // LSL W11,W11,#2
+0051ED78 6B0DCD1A   // SDIV W11,W11,W13 (x4/3)
+0051ED7C 8C751E53   // LSL W12,W12,#2
+0051ED80 8C0DCD1A   // SDIV W12,W12,W13 (x4/3)
+0051ED84 E92B0429   // STP W9,W10,[SP,#0x20]
+0051ED88 EB330529   // STP W11,W12,[SP,#0x28]
+0051ED8C C0035FD6   // RET
+// World-space UI (enemy health bars, weak point gauges, name labels, player
+// marker)
+// projects through the camera screen matrix, which is in real pixels and
+// must stay that way for tiled lighting. Scale only the final 2D positions
+// to 1920x1080 canvas units, via short routines placed after the scissor
+// routine in the freed debug overlay.
+0011C8E4 2F091014   // B health bar scale
+000F3D50 1DAC1014   // B name label scale
+000FD1B0 0A871014   // B player marker scale
+0051EDA0 E34700BD   // health bar: STR S3,[SP,#0x44] (moved)
+0051EDA4 04102D1E   // FMOV S4,#0.75
+0051EDA8 E34340BD   // LDR S3,[SP,#0x40]
+0051EDAC 6308241E   // FMUL S3,S3,S4
+0051EDB0 E34300BD   // STR S3,[SP,#0x40]
+0051EDB4 E34740BD   // LDR S3,[SP,#0x44]
+0051EDB8 6308241E   // FMUL S3,S3,S4
+0051EDBC E34700BD   // STR S3,[SP,#0x44]
+0051EDC0 CAF6EF17   // B back
+0051EDC4 02102D1E   // name label: FMOV S2,#0.75
+0051EDC8 2108221E   // FMUL S1,S1,S2 (x)
+0051EDCC 0008221E   // FMUL S0,S0,S2 (y)
+0051EDD0 E21F41BD   // LDR S2,[SP,#0x11C] (moved)
+0051EDD4 E053EF17   // B back
+0051EDD8 00102D1E   // player marker: FMOV S0,#0.75
+0051EDDC 4208201E   // FMUL S2,S2,S0 (x)
+0051EDE0 2108201E   // FMUL S1,S1,S0 (y)
+0051EDE4 4228231E   // FADD S2,S2,S3 (moved)
+0051EDE8 F378EF17   // B back
+0011E1B4 0E031014   // B weak point / off-screen marker scale
+0051EDEC 02102D1E   // weak point: FMOV S2,#0.75
+0051EDF0 0008221E   // FMUL S0,S0,S2 (y)
+0051EDF4 0028211E   // FADD S0,S0,S1 (moved)
+0051EDF8 610240BD   // LDR S1,[X19] (x)
+0051EDFC 2108221E   // FMUL S1,S1,S2
+0051EE00 610200BD   // STR S1,[X19]
+0051EE04 EDFCEF17   // B back
+// Pixel users of the 1920x1080 canvas getters, redirected to the real size.
+003AB9E8 DE51F197   // BL real width  (scene pass viewport width)
+003AB9F8 DC51F197   // BL real height (scene pass viewport height)
+0021B174 FB93F797   // BL real width  (overlay pass viewport width)
+0021B17C FB93F797   // BL real height (overlay pass viewport height)
+0023B5EC DD12F797   // BL real width  (half-size target width)
+0023B5FC DB12F797   // BL real height (half-size target height)
+0023B63C C912F797   // BL real width  (half-size target width)
+0023B64C C712F797   // BL real height (half-size target height)
+0003A74C 8716FF97   // BL real height (split-screen viewport height ratio)
+003E68F4 1B66F097   // BL real width  (default camera viewport width)
+003E68FC 1B66F097   // BL real height (default camera viewport height)
+003F42A8 AE2FF097   // BL real width  (event camera frame width)
+003F42B0 AE2FF097   // BL real height (event camera frame height)
+003F42B8 AA2FF097   // BL real width  (event camera viewport width)
+003F42C0 AA2FF097   // BL real height (event camera viewport height)
+003F48F8 1A2EF097   // BL real width  (camera viewport width)
+003F4900 1A2EF097   // BL real height (camera viewport height)
+// Render-target GPU pool, was 1024 MB.
+002ABDE4 0900AB52   // 1408 MB
+// Graphics block the pools are carved from, was 1945 MB (size, clear, allocator).
+002ABC4C 1532B252   // 2329 MB
+002ABD5C 0232B252   // 2329 MB
+// Root heap block around it, was 1950 MB.
+0045C260 003CB252   // 2334 MB
+@stop
+
+// Offsets reverse-engineered against Hyrule Warriors: Definitive Edition 1.0.1
+// (Koei Tecmo KTGL, NVN). The retail build is symbol-stripped; every site was
+// located by structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches
