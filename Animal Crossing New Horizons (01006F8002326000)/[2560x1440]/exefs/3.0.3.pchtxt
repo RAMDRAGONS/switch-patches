@@ -1,0 +1,55 @@
+@nsobid-FF1D1C05670DB6021C85B624A710B963
+
+# Animal Crossing: New Horizons 3.0.3 - 2560x1440 docked, 1280x720 handheld
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Renders at 2560x1440 docked and 1280x720 handheld.
+//
+// The game keeps its own resolution table (960x540, 1280x720, 1600x900,
+// 1920x1080, 2560x1440, 3840x2160) and picks an entry by index: 3 when
+// docked, 1 in handheld. The window texture, the gsys render buffers, the
+// docked render scale and the scan-out crop are all derived from the selected
+// entry, so this mod selects the table's own 2560x1440 entry (index 4)
+// instead of rewriting the sizes. The 2D canvas is a fixed 1280x720 and the
+// UI scales with the render size by itself.
+//
+// REQUIRES Ryujinx > System > DRAM Size set to 6 GiB or higher. The larger
+// window buffers, render-texture pool and the heap partitions that hold them
+// come out of the take-the-rest partition, which has almost no slack at 4 GiB.
+
+@enabled
+// Docked index in the operation-mode handler (handheld stays 1280x720).
+01527EC0 89008052   // MOVZ W9,#4 (was 3)
+// Boot index, read before the first operation-mode event.
+015281F8 89008052   // MOVZ W9,#4 (was 3)
+// Docked depth-shadow size (2048, 1536 handheld) is chosen by comparing the
+// index against 3; compare against the new docked index instead.
+01527FA8 3F110071   // CMP W9,#4 (was 3)
+// sead framework window size, written into the create arg over the getter.
+005CDCC0 084081D2   // MOVZ X8,#0xA00
+005CDCC4 08B4C0F2   // MOVK X8,#0x5A0,LSL#32
+// Fallbacks used when the table is read before the game object exists.
+005CDD14 09B48052   // MOVZ W9,#0x5A0
+005CDD18 08408152   // MOVZ W8,#0xA00
+005C9B78 08B48052   // MOVZ W8,#0x5A0
+005C9B7C 09408152   // MOVZ W9,#0xA00
+// gsys dynamic texture pool (agl::DTA), stock 0x4C00000 (76 MB) for 1080p.
+// Render buffers and the sun shadow map are allocated from it per frame.
+// Sized for 2560x1440 plus 4096x4096 shadows with four cascades.
+005C9B90 0AA0A252   // MOVZ W10,#0x1500,LSL#16 = 336 MB
+// Boot heap partitions (static table read by the sead TaskMgr), stock
+// cSys 0x0A8DF000 and cGfx 0x09900000. cSys holds the framework window
+// buffers and the system tasks that start after them, so it grows with the
+// window size; cGfx holds gsys and the render-texture pool, so it grows by
+// the pool increase plus headroom. Both are carved from cOthers.
+0404D658 00F08D0D   // cSys = 0x0D8DF000 (+48 MB)
+0404D660 0000D01D   // cGfx = 0x1DD00000 = 477 MB
+@stop
+
+// Offsets reverse-engineered against Animal Crossing: New Horizons 3.0.3
+// (sead + agl/gsys, NVN). The retail build is symbol-stripped; every site was
+// located by structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

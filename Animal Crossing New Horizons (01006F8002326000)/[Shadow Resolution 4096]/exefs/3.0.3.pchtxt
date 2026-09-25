@@ -1,0 +1,35 @@
+@nsobid-FF1D1C05670DB6021C85B624A710B963
+
+# Animal Crossing: New Horizons 3.0.3 - 4096x4096 depth shadow map
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces the sun cascade shadow map to 4096x4096 so shadow edges stop
+// being blocky.
+//
+// The game writes the shadow size into gsys's depth_shadow_tex_width /
+// _height parameters on every operation-mode change: 2048 docked, 1536 in
+// handheld. The per-frame shadow draw then scales that size by the viewport
+// ratio and takes a minimum, which only ever shrinks it. Overwriting the two
+// parameter reads with immediates sidesteps both: the minimum keeps the
+// immediate for any viewport at or above the reference size, and the size
+// no longer depends on the dock state.
+//
+// The shadow map is a cascade texture array allocated per frame from the
+// gsys dynamic texture pool, and 4096 is 4x the memory of the docked
+// default per cascade. The stock 76 MB pool cannot hold it; install one of
+// the resolution mods alongside this, which size that pool for it. Do not
+// duplicate the pool offset here.
+
+@enabled
+// depth_shadow_tex_width / _height reads in the per-frame depth shadow draw.
+039AF0DC 0A008252   // MOVZ W10,#4096 (was LDR W10,[X8,#0x17C0])
+039AF0E0 08008252   // MOVZ W8,#4096  (was LDR W8,[X8,#0x17E0])
+@stop
+
+// Offsets reverse-engineered against Animal Crossing: New Horizons 3.0.3
+// (sead + agl/gsys, NVN). The retail build is symbol-stripped; every site was
+// located by structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

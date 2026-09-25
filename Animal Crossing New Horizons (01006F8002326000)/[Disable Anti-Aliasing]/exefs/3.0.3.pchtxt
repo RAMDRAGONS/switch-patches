@@ -1,0 +1,27 @@
+@nsobid-FF1D1C05670DB6021C85B624A710B963
+
+# Animal Crossing: New Horizons 3.0.3 - Disable anti-aliasing
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Disables the post-process anti-aliasing pass.
+//
+// agl::pfx::FilterAA draws the final image through one of its AA modes,
+// picked by an antialias_type parameter that scene settings can change:
+// 0 = FXAA, 1 = ReduceAA, 2 = SMAA. When the filter
+// is off it instead copies the image through unchanged. The FXAA and SMAA
+// cases are redirected to that pass-through copy, so the output is the
+// engine's own no-AA image and a scene selecting either mode cannot turn
+// edge AA back on. ReduceAA is left alone.
+
+@enabled
+0393EA08 46000014   // B pass-through (FXAA case, was LDR S0,[X21,#0x988])
+0393ECF4 8BFFFF17   // B pass-through (SMAA case, was MOV X0,X21)
+@stop
+
+// Offsets reverse-engineered against Animal Crossing: New Horizons 3.0.3
+// (sead + agl/gsys, NVN). The retail build is symbol-stripped; every site was
+// located by structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches
