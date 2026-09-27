@@ -1,0 +1,89 @@
+@nsobid-7E1DF8E08D60544BBDCA1E333C153C97
+
+# Xenoblade Chronicles: Definitive Edition 2.0.0 - 2560x1440 resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Renders at 2560x1440 instead of the stock 1280x720 or less. The game uses
+// the same size docked and handheld, so the mod holds in both modes.
+//
+// The engine sizes the frame from the NVN window textures: two color buffers
+// and a depth buffer created at 1280x720 on one pair of registers. The scene
+// targets take the window texture size, and the render-target planner lays out
+// every G-buffer, depth, post-process, TMAA and bloom target in one GPU pool
+// from the device size getters, both when it is built and when it is
+// re-planned. Both now use 2560x1440; the planner's half, quarter and mip
+// sizes follow from it, and so do the pool offsets.
+//
+// The device size getters stay at 1280x720. The game calls them for work laid
+// out in that space, such as debug overlays and camera aspect ratios.
+//
+// The UI layer maps layout units to the screen with twice the canvas scale,
+// min(width/1280, height/720), which is 1 at stock. Layout part panes, such as
+// the title menu, place their child panes from offsets in 1280x720 layout
+// pixels, but first divide them by width/1280 as if they were screen pixels.
+// That factor is 1 at stock and nothing else reads it; at a higher resolution
+// the children slide toward the top-left corner while keeping their size. The
+// divisor is pinned to 1.0.
+//
+// The layer's size getters return the render target size, but every caller
+// in the game UI treats it as the 1280x720 layout size: screen centers for
+// menus, maps and cursors, and clamp bounds for pane positions. They return
+// the layout size instead, which is what they return at stock.
+//
+// Nine-slice window and stretch panes size their corner and edge pieces from
+// the pane size in layout pixels, but divide that size by the canvas scale
+// once more. At stock the scale is 1; at a higher resolution the pieces grow
+// by the scale, which enlarges the frame corners and pulls the frame inside
+// the window. Both divisors are pinned to 1.0.
+//
+// The graphics device caches the current viewport and seeds it with
+// 1280x720 before the first frame sets one; the seed is the full target.
+//
+// Dynamic resolution steps the frame between 0.94 x 1.0 and 0.6 x 0.84 of the
+// window size based on GPU load, so stock docked output tops out at about
+// 1203x720. Its default scales come from a read-only table; the minimum,
+// maximum and starting scales are set to 1.0, so every level renders the full
+// 2560x1440.
+//
+// REQUIRES Ryujinx > System > DRAM Size set to 6 GiB or higher. Every render
+// target comes from the GLIBPXL texture heap (350 MB) inside GLIBTOP (489 MB),
+// carved from the 512 MB MLGRAHANDLE root heap. The larger targets need about
+// 1024 MB more, so GLIBPXL and MLGRAHANDLE each grow by exactly that much and
+// the parent keeps its stock headroom: 1374 MB GLIBPXL, 1513 MB GLIBTOP,
+// 1536 MB MLGRAHANDLE. The root heaps are malloc'd from
+// nn::os::SetMemoryHeapSize(all remaining memory), which follows the
+// emulator's DRAM setting.
+@enabled
+// Window textures (both color buffers and the depth buffer).
+00612548 15408152   // MOV W21, #0xA00 = width (was MOV W21,#0x500)
+0061254C 16B48052   // MOV W22, #0x5A0 = height (was MOV W22,#0x2D0)
+// Initial cached viewport rectangle.
+009D1F68 000020450000B444   // 2560.0, 1440.0 (was 1280.0, 720.0)
+// Render-target planner base size (was the 1280x720 device getters).
+006A1E34 00408152   // MOV W0, #0xA00 = build width (was BL 0x5B5F40)
+006A1E3C 00B48052   // MOV W0, #0x5A0 = build height (was BL 0x5B5F60)
+006A1EB0 00408152   // MOV W0, #0xA00 = re-plan width (was BL 0x5B5F40)
+006A1EB8 00B48052   // MOV W0, #0x5A0 = re-plan height (was BL 0x5B5F60)
+// Layer size getters return the 1280x720 layout size.
+00749894 00D145BD   // LDR S0, [X8, #0x5D0] = layout width (was LDR S0,[X8,#0x5B0])
+007498A4 00D545BD   // LDR S0, [X8, #0x5D4] = layout height (was LDR S0,[X8,#0x5B4])
+// Layout part child placement: offsets are already in layout pixels.
+0075EB9C 03102E1E   // FMOV S3, #1.00000000 = width/1280 divisor (was LDR S3,[X9,#0x5DC])
+// Nine-slice piece sizes: pane size is already in layout pixels.
+00753048 01102E1E   // FMOV S1, #1.00000000 = stretch pane scale (was FDIV S1,S4,S1)
+00753F3C 00102E1E   // FMOV S0, #1.00000000 = window pane scale (was FDIV S0,S1,S0)
+// Dynamic resolution defaults: max, min and starting scales all 1.0.
+009D360C 0000803F   // max x 1.0 (was 0.94)
+009D3614 0000803F   // min x 1.0 (was 0.6)
+009D3618 0000803F   // min y 1.0 (was 0.84)
+009D361C 0000803F   // starting x 1.0 (was 0.94)
+// GPU memory: GLIBPXL and its MLGRAHANDLE root grow by the same amount.
+009D1F44 0000E055   // GLIBPXL 1374 MB (was 350 MB)
+00009858 0800AC52   // MOV W8, #0x60000000 = MLGRAHANDLE 1536 MB (was ORR W8,WZR,#0x20000000, 512 MB)
+@stop
+
+// Byte-verified against the IDB.
+//
+// https://github.com/RAMDRAGONS/switch-patches

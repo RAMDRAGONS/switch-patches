@@ -1,0 +1,293 @@
+@nsobid-7E1DF8E08D60544BBDCA1E333C153C97
+
+# Xenoblade Chronicles: Definitive Edition 2.0.0 - 60 FPS
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Unlocks the frame rate to 60 FPS.
+//
+// The game never sets an NVN present interval; it paces itself with a CPU
+// wait at the end of each frame that spins until the elapsed time reaches
+// (1/60 s) x swap interval x 0.997. The swap interval is a global int written
+// by a single setter, called once at boot with 2 (30 FPS). The same global
+// scales the dynamic resolution load metric's frame budget, so requesting 1
+// moves both the frame limiter and the resolution scaler to a 16.7 ms budget.
+//
+// The layer (UI) manager advances its animations by a fixed per-frame step
+// that its constructor seeds from a {30.0, 1/30} rodata pair; nothing else
+// writes that step. At 60 FPS it would run menus and HUD animations at double
+// speed, so the 1/30 half of the pair becomes 1/60. The adjacent rodata loads
+// are 8-byte reads of other constants and do not overlap this word.
+//
+// Gameplay, cutscenes and effects take their step from the update context,
+// but a few waits still count updates in 30 Hz frames and would halve at 60
+// FPS. Each starts at twice its stock count: the player camera's 5-update
+// input lock after a reset, a menu's 30-update input hold after a voice line,
+// a menu's 8-update delay before its sound or voice call, the 5-update delay
+// before a menu hint animation starts, and the 10- and 60-update holds at
+// black between fades in a field sequence.
+//
+// Menu layout animations are baked with one key per animation frame, and the
+// layer applies the key at the whole frame with no blending, so menus and
+// pop-ups animate at 30 Hz even at 60 FPS. The two keyframe samplers now blend
+// the current key with the next one by the fractional frame when the next key
+// is exactly one frame later, which leaves holds and jumps as authored. The
+// position, matrix and colour channels take both key values and blend them,
+// and the pattern channel keeps the current key. The setup code fits in the
+// samplers' parent combine blocks, which are rewritten more compactly.
+
+@enabled
+005F02B0 20008052   // MOVZ W0,#1 = swap interval 1 (was ORR W0,WZR,#2 at boot)
+009D0ADC 8988883C   // 1/60f layer manager frame step (was 1/30f, 0x3D088889)
+// Update-counted waits start at twice the stock count
+000529B0 0824A852   // MOV W8, #0x41200000 = camera input lock 10.0 after a reset (was 5.0)
+00052B94 0824A852   // MOV W8, #0x41200000 = camera input lock 10.0 after a reset (was 5.0)
+001E8748 48018052   // MOV W8, #10 = menu hint animation delay (was 5)
+002D5214 88078052   // MOV W8, #60 = menu input hold after a voice line (was 30)
+0031F4EC 08028052   // MOV W8, #16 = menu sound or voice call delay (was 8)
+0055598C 88028052   // MOV W8, #20 = field sequence hold at black (was 10)
+00556A38 080F8052   // MOV W8, #120 = field sequence hold at black (was 60)
+// Layout animation keys blend with the next frame's key
+// Sampler 1: blend setup, then the pane reset
+007546E8 E10318AA   // MOV X1, X24
+007546EC 3D000094   // BL 0x7547E0
+007546F0 1F2003D5   // NOP
+007546F4 1F2003D5   // NOP
+007546F8 1F2003D5   // NOP
+007546FC 1F2003D5   // NOP
+// Sampler 1 parent combine, compacted; blend setup follows
+00754758 7046402D   // LDP S16, S17, [X19]
+0075475C 724E412D   // LDP S18, S19, [X19, #0x8]
+00754760 7456422D   // LDP S20, S21, [X19, #0x10]
+00754764 C39A462D   // LDP S3, S6, [X22, #0x34]
+00754768 C18A472D   // LDP S1, S2, [X22, #0x3C]
+0075476C C496482D   // LDP S4, S5, [X22, #0x44]
+00754770 400A211E   // FMUL S0, S18, S1
+00754774 A002041F   // FMADD S0, S21, S4, S0
+00754778 470A251E   // FMUL S7, S18, S5
+0075477C A71E021F   // FMADD S7, S21, S2, S7
+00754780 560A231E   // FMUL S22, S18, S3
+00754784 B65A061F   // FMADD S22, S21, S6, S22
+00754788 D62A301E   // FADD S22, S22, S16
+0075478C 970A211E   // FMUL S23, S20, S1
+00754790 775E041F   // FMADD S23, S19, S4, S23
+00754794 980A251E   // FMUL S24, S20, S5
+00754798 7862021F   // FMADD S24, S19, S2, S24
+0075479C 990A231E   // FMUL S25, S20, S3
+007547A0 7966061F   // FMADD S25, S19, S6, S25
+007547A4 392B311E   // FADD S25, S25, S17
+007547A8 D666002D   // STP S22, S25, [X22]
+007547AC C062012D   // STP S0, S24, [X22, #0x8]
+007547B0 D71E022D   // STP S23, S7, [X22, #0x10]
+007547B4 C0C2C43C   // LDUR Q0, [X22, #0x4C]
+007547B8 6182C13C   // LDUR Q1, [X19, #0x18]
+007547BC 21DC206E   // FMUL V1.4S, V1.4S, V0.4S
+007547C0 C182813C   // STUR Q1, [X22, #0x18]
+007547C4 C0C2C53C   // LDUR Q0, [X22, #0x5C]
+007547C8 6182C23C   // LDUR Q1, [X19, #0x28]
+007547CC 21D4204E   // FADD V1.4S, V1.4S, V0.4S
+007547D0 C11600FD   // STR D1, [X22, #0x28]
+007547D4 C8C20091   // ADD X8, X22, #0x30
+007547D8 0181004D   // ST1 { V1.S }[2], [X8]
+007547DC 33000014   // B 0x7548A8
+007547E0 C9D24079   // LDRH W9, [X22, #0x68]
+007547E4 3E01271E   // FMOV S30, W9
+007547E8 1FE4002F   // MOVI D31, #0000000000000000
+007547EC 6A0340B9   // LDR W10, [X27]
+007547F0 2B050011   // ADD W11, W9, #0x1
+007547F4 7F010A6B   // CMP W11, W10
+007547F8 623D0054   // B.HS 0x754FA4
+007547FC 2C0840F9   // LDR X12, [X1, #0x10]
+00754800 6D0740B9   // LDR W13, [X27, #0x4]
+00754804 8C010D8B   // ADD X12, X12, X13
+00754808 8F09098B   // ADD X15, X12, X9, LSL #2
+0075480C ED014079   // LDRH W13, [X15]
+00754810 EE094079   // LDRH W14, [X15, #0x4]
+00754814 EF194039   // LDRB W15, [X15, #0x6]
+00754818 6F3C0037   // TBNZ W15, #0x0, 0x754FA4
+0075481C B0050011   // ADD W16, W13, #0x1
+00754820 DF01106B   // CMP W14, W16
+00754824 013C0054   // B.NE 0x754FA4
+00754828 107041F9   // LDR X16, [X0, #0x2E0]
+0075482C 31074079   // LDRH W17, [X25, #0x2]
+00754830 8E018052   // MOV W14, #0xC
+00754834 30420E9B   // MADD X16, X17, X14, X16
+00754838 000640BD   // LDR S0, [X16, #0x4]
+0075483C A101231E   // UCVTF S1, W13
+00754840 D1010014   // B 0x754F84
+// Sampler 2: blend setup, then the pane reset
+00754E9C E10314AA   // MOV X1, X20
+00754EA0 50FEFF97   // BL 0x7547E0
+00754EA4 1F2003D5   // NOP
+00754EA8 1F2003D5   // NOP
+00754EAC 1F2003D5   // NOP
+00754EB0 1F2003D5   // NOP
+// Sampler 2 parent combine, compacted; blend setup continues
+00754EFC 7046402D   // LDP S16, S17, [X19]
+00754F00 724E412D   // LDP S18, S19, [X19, #0x8]
+00754F04 7456422D   // LDP S20, S21, [X19, #0x10]
+00754F08 C39A462D   // LDP S3, S6, [X22, #0x34]
+00754F0C C18A472D   // LDP S1, S2, [X22, #0x3C]
+00754F10 C496482D   // LDP S4, S5, [X22, #0x44]
+00754F14 400A211E   // FMUL S0, S18, S1
+00754F18 A002041F   // FMADD S0, S21, S4, S0
+00754F1C 470A251E   // FMUL S7, S18, S5
+00754F20 A71E021F   // FMADD S7, S21, S2, S7
+00754F24 560A231E   // FMUL S22, S18, S3
+00754F28 B65A061F   // FMADD S22, S21, S6, S22
+00754F2C D62A301E   // FADD S22, S22, S16
+00754F30 970A211E   // FMUL S23, S20, S1
+00754F34 775E041F   // FMADD S23, S19, S4, S23
+00754F38 980A251E   // FMUL S24, S20, S5
+00754F3C 7862021F   // FMADD S24, S19, S2, S24
+00754F40 990A231E   // FMUL S25, S20, S3
+00754F44 7966061F   // FMADD S25, S19, S6, S25
+00754F48 392B311E   // FADD S25, S25, S17
+00754F4C D666002D   // STP S22, S25, [X22]
+00754F50 C062012D   // STP S0, S24, [X22, #0x8]
+00754F54 D71E022D   // STP S23, S7, [X22, #0x10]
+00754F58 C0C2C43C   // LDUR Q0, [X22, #0x4C]
+00754F5C 6182C13C   // LDUR Q1, [X19, #0x18]
+00754F60 21DC206E   // FMUL V1.4S, V1.4S, V0.4S
+00754F64 C182813C   // STUR Q1, [X22, #0x18]
+00754F68 C0C2C53C   // LDUR Q0, [X22, #0x5C]
+00754F6C 6182C23C   // LDUR Q1, [X19, #0x28]
+00754F70 21D4204E   // FADD V1.4S, V1.4S, V0.4S
+00754F74 C11600FD   // STR D1, [X22, #0x28]
+00754F78 C8C20091   // ADD X8, X22, #0x30
+00754F7C 0181004D   // ST1 { V1.S }[2], [X8]
+00754F80 23000014   // B 0x75500C
+00754F84 0038211E   // FSUB S0, S0, S1
+00754F88 0820201E   // FCMP S0, #0.0
+00754F8C CD000054   // B.LE 0x754FA4
+00754F90 01102E1E   // FMOV S1, #1.00000000
+00754F94 0020211E   // FCMP S0, S1
+00754F98 6A000054   // B.GE 0x754FA4
+00754F9C 1F40201E   // FMOV S31, S0
+00754FA0 7E01271E   // FMOV S30, W11
+00754FA4 09220090   // ADRP X9, 0xB94000
+00754FA8 28074039   // LDRB W8, [X25, #0x1]
+00754FAC 295945F9   // LDR X9, [X9, #0xAB0]
+00754FB0 287968F8   // LDR X8, [X9, X8, LSL #3]
+00754FB4 E00316AA   // MOV X0, X22
+00754FB8 00011FD6   // BR X8
+// Key value dispatch, 8-bit index table: current and next key values
+00755138 24D961F8   // LDR X4, [X9, W1, SXTW #3]
+0075513C 09D04079   // LDRH W9, [X0, #0x68]
+00755140 CA03261E   // FMOV W10, S30
+00755144 61686938   // LDRB W1, [X3, X9]
+00755148 63686A38   // LDRB W3, [X3, X10]
+// Key value dispatch, 16-bit index table
+00755158 24D961F8   // LDR X4, [X9, W1, SXTW #3]
+0075515C 09D04079   // LDRH W9, [X0, #0x68]
+00755160 CA03261E   // FMOV W10, S30
+00755164 61786978   // LDRH W1, [X3, X9, LSL #1]
+00755168 63786A78   // LDRH W3, [X3, X10, LSL #1]
+// Key value dispatch, 32-bit index table
+00755178 24D961F8   // LDR X4, [X9, W1, SXTW #3]
+0075517C 09D04079   // LDRH W9, [X0, #0x68]
+00755180 CA03261E   // FMOV W10, S30
+00755184 617869B8   // LDR W1, [X3, X9, LSL #2]
+00755188 63786AB8   // LDR W3, [X3, X10, LSL #2]
+// Translation channel: blend current and next key
+00755190 405861FC   // LDR D0, [X2, W1, UXTW #3]
+00755194 415863FC   // LDR D1, [X2, W3, UXTW #3]
+00755198 21D4A00E   // FSUB V1.2S, V1.2S, V0.2S
+0075519C 20109F0F   // FMLA V0.2S, V1.2S, V31.S[0]
+007551A0 004003FC   // STUR D0, [X0, #0x34]
+007551A4 C0035FD6   // RET
+// Matrix channel: blend
+007551B0 405861FC   // LDR D0, [X2, W1, UXTW #3]
+007551B4 415863FC   // LDR D1, [X2, W3, UXTW #3]
+007551B8 21D4A00E   // FSUB V1.2S, V1.2S, V0.2S
+007551BC 20109F0F   // FMLA V0.2S, V1.2S, V31.S[0]
+007551C0 00C003FC   // STUR D0, [X0, #0x3C]
+007551C4 C0035FD6   // RET
+// Matrix channel: blend
+007551D0 405861FC   // LDR D0, [X2, W1, UXTW #3]
+007551D4 415863FC   // LDR D1, [X2, W3, UXTW #3]
+007551D8 21D4A00E   // FSUB V1.2S, V1.2S, V0.2S
+007551DC 20109F0F   // FMLA V0.2S, V1.2S, V31.S[0]
+007551E0 004004FC   // STUR D0, [X0, #0x44]
+007551E4 C0035FD6   // RET
+// Matrix channel: blend
+007551F0 4058E13C   // LDR Q0, [X2, W1, UXTW #4]
+007551F4 4158E33C   // LDR Q1, [X2, W3, UXTW #4]
+007551F8 21D4A04E   // FSUB V1.4S, V1.4S, V0.4S
+007551FC 20109F4F   // FMLA V0.4S, V1.4S, V31.S[0]
+00755200 004004FC   // STUR D0, [X0, #0x44]
+00755204 0104185E   // MOV D1, V0.D[1]
+00755208 01C003FC   // STUR D1, [X0, #0x3C]
+0075520C C0035FD6   // RET
+// Colour add channel: blend
+00755220 405861BC   // LDR S0, [X2, W1, UXTW #2]
+00755224 415863BC   // LDR S1, [X2, W3, UXTW #2]
+00755228 00A4082F   // USHLL V0.8H, V0.8B, #0x0
+0075522C 00A4102F   // USHLL V0.4S, V0.4H, #0x0
+00755230 21A4082F   // USHLL V1.8H, V1.8B, #0x0
+00755234 21A4102F   // USHLL V1.4S, V1.4H, #0x0
+00755238 00D8216E   // UCVTF V0.4S, V0.4S
+0075523C 21D8216E   // UCVTF V1.4S, V1.4S
+00755240 21D4A04E   // FSUB V1.4S, V1.4S, V0.4S
+00755244 20109F4F   // FMLA V0.4S, V1.4S, V31.S[0]
+00755248 E81300D0   // ADRP X8, 0x9D3000
+0075524C 01294DBD   // LDR S1, [X8, #0xD28]
+00755250 0090814F   // FMUL V0.4S, V0.4S, V1.S[0]
+00755254 00C005FC   // STUR D0, [X0, #0x5C]
+00755258 08900191   // ADD X8, X0, #0x64
+0075525C 0081004D   // ST1 { V0.S }[2], [X8]
+// Colour multiply channel: blend
+00755270 405861BC   // LDR S0, [X2, W1, UXTW #2]
+00755274 415863BC   // LDR S1, [X2, W3, UXTW #2]
+00755278 00A4082F   // USHLL V0.8H, V0.8B, #0x0
+0075527C 00A4102F   // USHLL V0.4S, V0.4H, #0x0
+00755280 21A4082F   // USHLL V1.8H, V1.8B, #0x0
+00755284 21A4102F   // USHLL V1.4S, V1.4H, #0x0
+00755288 00D8216E   // UCVTF V0.4S, V0.4S
+0075528C 21D8216E   // UCVTF V1.4S, V1.4S
+00755290 21D4A04E   // FSUB V1.4S, V1.4S, V0.4S
+00755294 20109F4F   // FMLA V0.4S, V1.4S, V31.S[0]
+00755298 E81300D0   // ADRP X8, 0x9D3000
+0075529C 01294DBD   // LDR S1, [X8, #0xD28]
+007552A0 0090814F   // FMUL V0.4S, V0.4S, V1.S[0]
+007552A4 00C0843C   // STUR Q0, [X0, #0x4C]
+007552A8 C0035FD6   // RET
+// Colour multiply and add channel: blend
+007552D0 405861FC   // LDR D0, [X2, W1, UXTW #3]
+007552D4 415863FC   // LDR D1, [X2, W3, UXTW #3]
+007552D8 00A4082F   // USHLL V0.8H, V0.8B, #0x0
+007552DC 21A4082F   // USHLL V1.8H, V1.8B, #0x0
+007552E0 02A4102F   // USHLL V2.4S, V0.4H, #0x0
+007552E4 03A4106F   // USHLL2 V3.4S, V0.8H, #0x0
+007552E8 24A4102F   // USHLL V4.4S, V1.4H, #0x0
+007552EC 25A4106F   // USHLL2 V5.4S, V1.8H, #0x0
+007552F0 42D8216E   // UCVTF V2.4S, V2.4S
+007552F4 63D8216E   // UCVTF V3.4S, V3.4S
+007552F8 84D8216E   // UCVTF V4.4S, V4.4S
+007552FC A5D8216E   // UCVTF V5.4S, V5.4S
+00755300 84D4A24E   // FSUB V4.4S, V4.4S, V2.4S
+00755304 A5D4A34E   // FSUB V5.4S, V5.4S, V3.4S
+00755308 82109F4F   // FMLA V2.4S, V4.4S, V31.S[0]
+0075530C A3109F4F   // FMLA V3.4S, V5.4S, V31.S[0]
+00755310 E81300D0   // ADRP X8, 0x9D3000
+00755314 01294DBD   // LDR S1, [X8, #0xD28]
+00755318 4290814F   // FMUL V2.4S, V2.4S, V1.S[0]
+0075531C 6390814F   // FMUL V3.4S, V3.4S, V1.S[0]
+00755320 02C0843C   // STUR Q2, [X0, #0x4C]
+00755324 03C005FC   // STUR D3, [X0, #0x5C]
+00755328 08900191   // ADD X8, X0, #0x64
+0075532C 0381004D   // ST1 { V3.S }[2], [X8]
+00755330 C0035FD6   // RET
+// Pattern channel: current key value
+00755368 01AC0139   // STRB W1, [X0, #0x6B]
+@stop
+
+// 60 FPS method from the FPSLocker patch for this build
+// (https://github.com/masagrator/FPSLocker-Warehouse). Its runtime writes to
+// the swap interval globals and the layer manager step are replaced by the
+// static sources of those values. Its dynamic resolution budget hook is
+// omitted: at 60 FPS it returns 1/60, identical to the stock refresh period
+// getter it replaces. Byte-verified against the IDB.
+//
+// https://github.com/RAMDRAGONS/switch-patches
