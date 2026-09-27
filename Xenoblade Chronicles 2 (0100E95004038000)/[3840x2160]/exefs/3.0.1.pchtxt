@@ -1,0 +1,110 @@
+@nsobid-4F5C96E2D97F45AC288BC67613EBEF0A
+
+# Xenoblade Chronicles 2 3.0.1 - 3840x2160 resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Renders at 3840x2160 instead of the stock 1280x720 or less. The game uses
+// the same size docked and handheld, so the mod holds in both modes.
+//
+// The engine sizes the frame from the NVN window textures: two color buffers
+// and a depth buffer created at 1280x720 on one pair of registers. The scene
+// targets take the window texture size, and the render-target planner lays out
+// every G-buffer, depth, post-process, TMAA and bloom target in one GPU pool
+// from the device size getters. Both now use 3840x2160; the planner's half,
+// quarter and mip sizes follow from it, and so do the pool offsets. Binding a
+// target sets the viewport to that target's own size, and the UI layer scales
+// its 1280x720 canvas to the target it draws into.
+//
+// The device size getters stay at 1280x720. The game calls them for work laid
+// out in that space: debug overlays and desktop windows, and the aspect ratio
+// of the 3D and menu cameras.
+//
+// Screen-space effects are authored in 1280x720 pixels. The effect library
+// builds its screen-space projection, the pixel scale of 2D particles, and the
+// rectangles of its full-screen blits and zoom blur by dividing by the real
+// target size, so at a higher resolution they shrink toward their anchor.
+// Those divisions now use 1280x720, which reproduces the stock screen
+// coverage.
+//
+// Dynamic resolution steps the frame between 0.94 x 1.0 and 0.6 x 0.84 of the
+// window size based on GPU load, so stock docked output tops out at about
+// 1203x720. Its minimum and maximum scales are set to 1.0, so every level
+// renders the full 3840x2160.
+//
+// REQUIRES Ryujinx > System > DRAM Size set to 8 GiB or higher. Every render
+// target comes from the GLIBPXL texture heap (362 MB) inside GLIBTOP (491 MB),
+// carved from the 512 MB MLGRAHANDLE root heap. The larger targets need about
+// 2560 MB more, so GLIBPXL and MLGRAHANDLE each grow by exactly that much and
+// the parent keeps its stock headroom: 2922 MB GLIBPXL, 3051 MB GLIBTOP,
+// 3072 MB MLGRAHANDLE. The root heaps are malloc'd from
+// nn::os::SetMemoryHeapSize(all remaining memory), which follows the
+// emulator's DRAM setting.
+@enabled
+// Window textures (both color buffers and the depth buffer).
+00700640 15E08152   // MOV W21, #0xF00 = width (was MOV W21,#0x500)
+00700644 160E8152   // MOV W22, #0x870 = height (was MOV W22,#0x2D0)
+// Render-target planner base size (was the 1280x720 device getters).
+00791A34 00E08152   // MOV W0, #0xF00 = width (was BL 0x6A2EDC)
+00791A3C 000E8152   // MOV W0, #0x870 = height (was BL 0x6A2EFC)
+// Renderer's initial viewport size.
+006FFE28 08AEA852   // MOV W8, #0x45700000 = 3840.0 (was 1280.0)
+006FFE30 E8A0A852   // MOV W8, #0x45070000 = 2160.0 (was 720.0)
+// Dynamic resolution: max, min and current scales all 1.0.
+007E3394 08F0A752   // MOV W8, #0x3F800000 = max x (was 0.94)
+007E3398 08008072   // MOVK W8, #0x0 = low half (was MOVK W8,#0xA3D7)
+007E33A4 08F0A752   // MOV W8, #0x3F800000 = min x (was 0.6)
+007E33A8 09F0A752   // MOV W9, #0x3F800000 = min y (was 0.84)
+007E33AC 08008072   // MOVK W8, #0x0 = low half (was MOVK W8,#0x999A)
+007E33B0 09008072   // MOVK W9, #0x0 = low half (was MOVK W9,#0xA3D)
+007E33E4 08F0A7F2   // MOVK X8, #0x3F80, LSL #16 = current x (was 0.94)
+007E33E8 080080F2   // MOVK X8, #0x0 = low half (was MOVK X8,#0xA3D7)
+// Effect library: 2D particle pixel scale in 1280x720 space.
+0085D724 0DA08052   // MOV W13, #0x500 = width (was LDR S2,[X13,#0x550])
+0085D728 A201231E   // UCVTF S2, W13 = was UCVTF S2,S2
+0085D740 0D5A8052   // MOV W13, #0x2D0 = height (was LDR S2,[X13,#0x554])
+0085D744 A201231E   // UCVTF S2, W13 = was ORR W13,WZR,#0x1
+0085D748 ED030032   // ORR W13, WZR, #0x1 = was UCVTF S2,S2
+0085D82C 08A08052   // MOV W8, #0x500 = width (was LDR S1,[X8,#0x550])
+0085D830 0101231E   // UCVTF S1, W8 = was UCVTF S1,S1
+0085D848 085A8052   // MOV W8, #0x2D0 = height (was LDR S1,[X8,#0x554])
+0085D850 0101231E   // UCVTF S1, W8 = was UCVTF S1,S1
+0085DD80 09A08052   // MOV W9, #0x500 = width (was LDR S0,[X8,#0x550])
+0085DD8C 2001231E   // UCVTF S0, W9 = was UCVTF S0,S0
+0085DDA4 095A8052   // MOV W9, #0x2D0 = height (was LDR S1,[X8,#0x554])
+0085DDAC 2101231E   // UCVTF S1, W9 = was UCVTF S1,S1
+0085E43C 09A08052   // MOV W9, #0x500 = width (was LDR S0,[X9,#0x550])
+0085E440 2001231E   // UCVTF S0, W9 = was UCVTF S0,S0
+0085E460 085A8052   // MOV W8, #0x2D0 = height (was LDR S1,[X8,#0x554])
+0085E468 0101231E   // UCVTF S1, W8 = was UCVTF S1,S1
+// Effect library: screen-space ortho projection in 1280x720 space.
+00862AC0 08A08052   // MOV W8, #0x500 = width (was LDR S0,[X21,#0x558])
+00862AC4 0001231E   // UCVTF S0, W8 = was UCVTF S0,S0
+00862AD8 085A8052   // MOV W8, #0x2D0 = height (was LDR S2,[X21,#0x55C])
+00862AE0 0201231E   // UCVTF S2, W8 = was UCVTF S2,S2
+// Effect library: blit rectangles and zoom blur in 1280x720 space.
+0085A66C 08A08052   // MOV W8, #0x500 = width (was LDR S0,[X24,#0x550])
+0085A670 0001231E   // UCVTF S0, W8 = was UCVTF S0,S0
+0085A67C 085A8052   // MOV W8, #0x2D0 = height (was LDR S1,[X24,#0x554])
+0085A680 0101231E   // UCVTF S1, W8 = was UCVTF S1,S1
+0085A68C 08A08052   // MOV W8, #0x500 = width (was LDR S3,[X24,#0x550])
+0085A694 0301231E   // UCVTF S3, W8 = was UCVTF S3,S3
+0085A6AC 085A8052   // MOV W8, #0x2D0 = height (was LDR S0,[X24,#0x554])
+0085A6B4 0001231E   // UCVTF S0, W8 = was UCVTF S0,S0
+0085C5EC 08A08052   // MOV W8, #0x500 = full-screen rect width (was LDR S0,[X1,#0x550])
+0085C5F0 0001231E   // UCVTF S0, W8 = was LDR S1,[X1,#0x554]
+0085C5F4 085A8052   // MOV W8, #0x2D0 = full-screen rect height (was UCVTF S0,S0)
+0085C5F8 0101231E   // UCVTF S1, W8 = was UCVTF S1,S1
+0085C664 08A08052   // MOV W8, #0x500 = full-screen rect width (was LDR S0,[X1,#0x550])
+0085C668 0001231E   // UCVTF S0, W8 = was LDR S1,[X1,#0x554]
+0085C66C 085A8052   // MOV W8, #0x2D0 = full-screen rect height (was UCVTF S0,S0)
+0085C670 0101231E   // UCVTF S1, W8 = was UCVTF S1,S1
+// GPU memory: GLIBPXL and its MLGRAHANDLE root grow by the same amount.
+006F4F74 09D4F6D2   // MOV X9, #0xB6A0000000000000 = GLIBPXL 2922 MB (was 362 MB)
+006421C4 0800B852   // MOV W8, #0xC0000000 = MLGRAHANDLE 3072 MB (was 512 MB)
+@stop
+
+// Byte-verified against the IDB.
+//
+// https://github.com/RAMDRAGONS/switch-patches

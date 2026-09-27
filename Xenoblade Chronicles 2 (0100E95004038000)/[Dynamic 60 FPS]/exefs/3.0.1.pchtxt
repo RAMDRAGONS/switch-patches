@@ -1,0 +1,325 @@
+@nsobid-4F5C96E2D97F45AC288BC67613EBEF0A
+
+# Xenoblade Chronicles 2 3.0.1 - Dynamic 60 FPS
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Runs gameplay and menus at up to 60 FPS with a step that follows the real
+// frame time, and real-time cutscenes at the stock 30 FPS.
+//
+// The game paces itself with a CPU wait of (1/60 s) x swap interval, and its
+// clock hands every subsystem the step stored in the framework object. Once
+// per presented frame, right before the present call, the patch reads the
+// event scene state that marks a playing real-time cutscene and sets the swap
+// interval and step: 1 and the measured frame time, or 2 and 1/30 s during
+// cutscenes. The layer (UI) manager gets the same step, and the wind
+// simulation reads it in place of its own 1/30 constant. Cutscenes run on a
+// timeline of whole 30 Hz frames that follows the voice and BGM, so they keep
+// stock timing at 30 FPS. The clock's scaled step keeps its speed factor,
+// which pauses and slows the game, and a speed change keeps the current step
+// instead of resetting it to the config rate.
+//
+// The frame time is the system counter difference since the previous present,
+// clamped to 1/60 to 1/30 s, so the game keeps real-time speed down to 30 FPS.
+// The previous counter value is kept in padding after the event manager's step
+// block. Menu waits counted in updates still count updates and last longer
+// below 60 FPS.
+//
+// Particle effects run on a fixed-step accumulator that gains 1.0 per update
+// and simulates one effect frame each time it reaches 1.0. It now gains, tests
+// and steps by the game step x 30, so effects keep their authored speed at any
+// step. Slow-motion group rates already scale this step below 1.0 at stock.
+//
+// A few gameplay waits count updates in 30 Hz frames: battle AI script frame
+// counts, the script frame(N) wait, the player camera's input lock after a
+// reset, and the hold and exit wait at the end of a battle sequence. Each
+// update they now advance by the game step x 30, which the frame code stores
+// with a 12-bit fixed-point copy in unused memory past the last .bss variable.
+// This is exact at any step and matches stock in cutscenes.
+//
+// Menu layouts animate on the layer step, and menu fades convert their frame
+// counts to seconds, so both follow the step. Menu scripts also wait a number
+// of updates, which would halve at 60 FPS. Most menus share one wait step that
+// copies the next queued count into a {bool, int} countdown; its start block
+// now stores the count doubled and returns through the step's own return path,
+// in the same six instructions. The remaining countdowns start from constants
+// or seconds x 30 and are doubled where they are set. The compass keeps a
+// two-update icon hold: its start value shares a register with a state enum,
+// and the hold is 66 ms at stock.
+//
+// Everything left on 30 Hz units converts authored frame counts to seconds
+// (x 1/30) and does not depend on the update rate. Pre-rendered movies play
+// through a separate player and are unaffected. Below 30 FPS the game slows
+// down, as stock does. The frame code sits in dead repeated static-init
+// blocks, whose guards are already set when the code runs.
+@enabled
+// Frame rate: up to 60 FPS, 30 FPS in real-time cutscenes
+007009E4 94C9E897   // BL 0x133034 = set the frame rate before each present (was MOV W8,#0x21A0)
+00133030 3A000014   // B 0x133118 = skip repeated static init (guard already set)
+00133034 20E03BD5   // MRS X0, CNTPCT_EL0
+00133038 225500B0   // ADRP X2, 0xBD8000
+0013303C 41444EB9   // LDR W1, [X2, #0xE44]
+00133040 40440EB9   // STR W0, [X2, #0xE44]
+00133044 0000014B   // SUB W0, W0, W1
+00133048 0000231E   // UCVTF S0, W0
+0013304C 60479652   // MOV W0, #0xB23B
+00133050 E06BA672   // MOVK W0, #0x335F, LSL #16
+00133054 0100271E   // FMOV S1, W0
+00133058 0008211E   // FMUL S0, S0, S1
+0013305C 20119152   // MOV W0, #0x8889
+00133060 0091A772   // MOVK W0, #0x3C88, LSL #16
+00133064 0100271E   // FMOV S1, W0
+00133068 2228211E   // FADD S2, S1, S1
+0013306C 0068211E   // FMAXNM S0, S0, S1
+00133070 0078221E   // FMINNM S0, S0, S2
+00133074 205500B0   // ADRP X0, 0xBD8000
+00133078 00007D39   // LDRB W0, [X0, #0xF40]
+0013307C 1F040071   // CMP W0, #0x1
+00133080 400C201E   // FCSEL S0, S2, S0, EQ
+00133084 21008052   // MOV W1, #0x1
+00133088 2114811A   // CINC W1, W1, EQ
+0013308C 025200D0   // ADRP X2, 0xB75000
+00133090 42003191   // ADD X2, X2, #0xC40
+00133094 41040029   // STP W1, W1, [X2]
+00133098 01D0271E   // FMOV S1, #30.00000000
+0013309C 0108211E   // FMUL S1, S0, S1
+001330A0 C2A500D0   // ADRP X2, 0x15ED000
+001330A4 42001491   // ADD X2, X2, #0x500
+001330A8 21D0181E   // FCVTZS W1, S1, #0xC
+001330AC 410000BD   // STR S1, [X2]
+001330B0 410400B9   // STR W1, [X2, #0x4]
+001330B4 E05200B0   // ADRP X0, 0xB90000
+001330B8 006840F9   // LDR X0, [X0, #0xD0]
+001330BC 800000B4   // CBZ X0, 0x1330CC
+001330C0 018040BD   // LDR S1, [X0, #0x80]
+001330C4 0108211E   // FMUL S1, S0, S1
+001330C8 00040F2D   // STP S0, S1, [X0, #0x78]
+001330CC 80570090   // ADRP X0, 0xC23000
+001330D0 006441F9   // LDR X0, [X0, #0x2C8]
+001330D4 400000B4   // CBZ X0, 0x1330DC
+001330D8 008000BD   // STR S0, [X0, #0x80]
+001330DC 08348452   // MOV W8, #0x21A0
+001330E0 C0035FD6   // RET
+// Clock speed changes and pauses keep the current step
+00183084 007840BD   // LDR S0, [X0, #0x78] = pause keeps the current step (was LDR S0,[X0,#0x14], the config fps)
+0018308C 1F2003D5   // NOP = step already loaded (was FDIV S0,S1,S0)
+00183148 007840BD   // LDR S0, [X0, #0x78] = speed change keeps the current step (was LDR S0,[X0,#0x14])
+00183150 1F2003D5   // NOP = step already loaded (was FDIV S0,S2,S0)
+// Step helpers
+00132AB0 1B000014   // B 0x132B1C = skip repeated static init (guard already set)
+00132AB4 E85200D0   // ADRP X8, 0xB90000
+00132AB8 086940F9   // LDR X8, [X8, #0xD0]
+00132ABC 067940BD   // LDR S6, [X8, #0x78]
+00132AC0 E8561814   // B 0x748660
+00132AC4 E85200D0   // ADRP X8, 0xB90000
+00132AC8 086940F9   // LDR X8, [X8, #0xD0]
+00132ACC 087940BD   // LDR S8, [X8, #0x78]
+00132AD0 09D0271E   // FMOV S9, #30.00000000
+00132AD4 0809291E   // FMUL S8, S8, S9
+00132AD8 1E971C14   // B 0x858750
+00132ADC D0A500F0   // ADRP X16, 0x15ED000
+00132AE0 010245BD   // LDR S1, [X16, #0x500]
+00132AE4 C0035FD6   // RET
+00132AE8 D0A500F0   // ADRP X16, 0x15ED000
+00132AEC 020245BD   // LDR S2, [X16, #0x500]
+00132AF0 C0035FD6   // RET
+00132AF4 D0A500F0   // ADRP X16, 0x15ED000
+00132AF8 100645B9   // LDR W16, [X16, #0x504]
+00132AFC 0801106B   // SUBS W8, W8, W16
+00132B00 C0035FD6   // RET
+// Wind and effect steps follow the game step
+00748658 17A9E717   // B 0x132AB4 = wind step from the game step (was ADRP X8,0x9B5000)
+0085874C DE68E317   // B 0x132AC4 = effect step = game step x 30 (was FMOV S8,#1.0)
+00858778 0941211E   // FNEG S9, S8 = effect accumulator subtract (was FMOV S9,#-1.0)
+// Update-counted gameplay waits advance by the game step x 30
+00002128 6DC20494   // BL 0x132ADC = battle AI setFrameCount wait (was FMOV S1,#-1.0)
+0000212C 0038211E   // FSUB S0, S0, S1 = was FADD S0,S0,S1
+00021CB8 8C430494   // BL 0x132AE8 = battle sequence end hold (was FMOV S2,#1.0)
+00021EB0 0B430494   // BL 0x132ADC = battle sequence exit wait, 60 (was FMOV S1,#1.0)
+001D0AD4 0288FD97   // BL 0x132ADC = player camera input lock after a reset, 5 (was FMOV S1,#-1.0)
+001D0ADC 0038211E   // FSUB S0, S0, S1 = was FADD S0,S0,S1
+0066AB64 E41FEB97   // BL 0x132AF4 = script frame(N) wait, 12-bit fixed point (was SUBS W8,W8,#0x1,LSL #12)
+// Menu sequence wait steps: start the countdown at 2x the queued count
+// blade_create (0x39AF08)
+0039AF50 08791F53   // LSL W8, W8, #1
+0039AF54 681606B9   // STR W8, [X19, #0x614]
+0039AF58 E8030032   // ORR W8, WZR, #1
+0039AF5C 68421839   // STRB W8, [X19, #0x610]
+0039AF60 F7FFFF17   // B 0x39AF3C
+// blade_name (0x39BB8C)
+0039BBD4 08791F53   // LSL W8, W8, #1
+0039BBD8 688602B9   // STR W8, [X19, #0x284]
+0039BBDC E8030032   // ORR W8, WZR, #1
+0039BBE0 68020A39   // STRB W8, [X19, #0x280]
+0039BBE4 F7FFFF17   // B 0x39BBC0
+// blade_release (0x39F31C)
+0039F364 08791F53   // LSL W8, W8, #1
+0039F368 688602B9   // STR W8, [X19, #0x284]
+0039F36C E8030032   // ORR W8, WZR, #1
+0039F370 68020A39   // STRB W8, [X19, #0x280]
+0039F374 F7FFFF17   // B 0x39F350
+// blade_set2 (0x3A3C60)
+003A3CA8 08791F53   // LSL W8, W8, #1
+003A3CAC 688602B9   // STR W8, [X19, #0x284]
+003A3CB0 E8030032   // ORR W8, WZR, #1
+003A3CB4 68020A39   // STRB W8, [X19, #0x280]
+003A3CB8 F7FFFF17   // B 0x3A3C94
+// bl_kizuna_ring (0x3AA6FC)
+003AA744 08791F53   // LSL W8, W8, #1
+003AA748 688602B9   // STR W8, [X19, #0x284]
+003AA74C E8030032   // ORR W8, WZR, #1
+003AA750 68020A39   // STRB W8, [X19, #0x280]
+003AA754 F7FFFF17   // B 0x3AA730
+// bl_weapon2 (0x3AD9FC)
+003ADA44 08791F53   // LSL W8, W8, #1
+003ADA48 688602B9   // STR W8, [X19, #0x284]
+003ADA4C E8030032   // ORR W8, WZR, #1
+003ADA50 68020A39   // STRB W8, [X19, #0x280]
+003ADA54 F7FFFF17   // B 0x3ADA30
+// btlch_tutorial (0x3B40B8)
+003B4100 08791F53   // LSL W8, W8, #1
+003B4104 688602B9   // STR W8, [X19, #0x284]
+003B4108 E8030032   // ORR W8, WZR, #1
+003B410C 68020A39   // STRB W8, [X19, #0x280]
+003B4110 F7FFFF17   // B 0x3B40EC
+// btl_time (0x3B638C)
+003B63D4 08791F53   // LSL W8, W8, #1
+003B63D8 688602B9   // STR W8, [X19, #0x284]
+003B63DC E8030032   // ORR W8, WZR, #1
+003B63E0 68020A39   // STRB W8, [X19, #0x280]
+003B63E4 F7FFFF17   // B 0x3B63C0
+// chapter_telop (0x3C3010)
+003C3058 08791F53   // LSL W8, W8, #1
+003C305C 685601B9   // STR W8, [X19, #0x154]
+003C3060 E8030032   // ORR W8, WZR, #1
+003C3064 68420539   // STRB W8, [X19, #0x150]
+003C3068 F7FFFF17   // B 0x3C3044
+// char_select (0x3D121C)
+003D1264 08791F53   // LSL W8, W8, #1
+003D1268 688602B9   // STR W8, [X19, #0x284]
+003D126C E8030032   // ORR W8, WZR, #1
+003D1270 68020A39   // STRB W8, [X19, #0x280]
+003D1274 F7FFFF17   // B 0x3D1250
+// char_select_ira (0x3D6FB0)
+003D6FF8 08791F53   // LSL W8, W8, #1
+003D6FFC 688602B9   // STR W8, [X19, #0x284]
+003D7000 E8030032   // ORR W8, WZR, #1
+003D7004 68020A39   // STRB W8, [X19, #0x280]
+003D7008 F7FFFF17   // B 0x3D6FE4
+// dr_kizuna_ring (0x3F6DA4)
+003F6DEC 08791F53   // LSL W8, W8, #1
+003F6DF0 688602B9   // STR W8, [X19, #0x284]
+003F6DF4 E8030032   // ORR W8, WZR, #1
+003F6DF8 68020A39   // STRB W8, [X19, #0x280]
+003F6DFC F7FFFF17   // B 0x3F6DD8
+// en_book (0x3FD8E8)
+003FD930 08791F53   // LSL W8, W8, #1
+003FD934 688602B9   // STR W8, [X19, #0x284]
+003FD938 E8030032   // ORR W8, WZR, #1
+003FD93C 68020A39   // STRB W8, [X19, #0x280]
+003FD940 F7FFFF17   // B 0x3FD91C
+// ev_theater (0x405444)
+0040548C 08791F53   // LSL W8, W8, #1
+00405490 685601B9   // STR W8, [X19, #0x154]
+00405494 E8030032   // ORR W8, WZR, #1
+00405498 68420539   // STRB W8, [X19, #0x150]
+0040549C F7FFFF17   // B 0x405478
+// hitonowa (0x427E00)
+00427E48 08791F53   // LSL W8, W8, #1
+00427E4C 68E604B9   // STR W8, [X19, #0x4E4]
+00427E50 E8030032   // ORR W8, WZR, #1
+00427E54 68821339   // STRB W8, [X19, #0x4E0]
+00427E58 F7FFFF17   // B 0x427E34
+// lvup_main (0x42D56C)
+0042D5B4 08791F53   // LSL W8, W8, #1
+0042D5B8 688602B9   // STR W8, [X19, #0x284]
+0042D5BC E8030032   // ORR W8, WZR, #1
+0042D5C0 68020A39   // STRB W8, [X19, #0x280]
+0042D5C4 F7FFFF17   // B 0x42D5A0
+// mainmenu2 (0x433AD4)
+00433B1C 08791F53   // LSL W8, W8, #1
+00433B20 688602B9   // STR W8, [X19, #0x284]
+00433B24 E8030032   // ORR W8, WZR, #1
+00433B28 68020A39   // STRB W8, [X19, #0x280]
+00433B2C F7FFFF17   // B 0x433B08
+// mercenary_form (0x43D05C)
+0043D0A4 08791F53   // LSL W8, W8, #1
+0043D0A8 681E03B9   // STR W8, [X19, #0x31C]
+0043D0AC E8030032   // ORR W8, WZR, #1
+0043D0B0 68620C39   // STRB W8, [X19, #0x318]
+0043D0B4 F7FFFF17   // B 0x43D090
+// mercenary_report (0x43EC70)
+0043ECB8 08791F53   // LSL W8, W8, #1
+0043ECBC 681E03B9   // STR W8, [X19, #0x31C]
+0043ECC0 E8030032   // ORR W8, WZR, #1
+0043ECC4 68620C39   // STRB W8, [X19, #0x318]
+0043ECC8 F7FFFF17   // B 0x43ECA4
+// ocg (0x44A638)
+0044A680 08791F53   // LSL W8, W8, #1
+0044A684 68E604B9   // STR W8, [X19, #0x4E4]
+0044A688 E8030032   // ORR W8, WZR, #1
+0044A68C 68821339   // STRB W8, [X19, #0x4E0]
+0044A690 F7FFFF17   // B 0x44A66C
+// popup (0x45DC0C)
+0045DC54 08791F53   // LSL W8, W8, #1
+0045DC58 688602B9   // STR W8, [X19, #0x284]
+0045DC5C E8030032   // ORR W8, WZR, #1
+0045DC60 68020A39   // STRB W8, [X19, #0x280]
+0045DC64 F7FFFF17   // B 0x45DC40
+// quest_log (0x46E0BC)
+0046E104 08791F53   // LSL W8, W8, #1
+0046E108 688602B9   // STR W8, [X19, #0x284]
+0046E10C E8030032   // ORR W8, WZR, #1
+0046E110 68020A39   // STRB W8, [X19, #0x280]
+0046E114 F7FFFF17   // B 0x46E0F0
+// quest_log (0x46E190)
+0046E1D8 08791F53   // LSL W8, W8, #1
+0046E1DC 68B603B9   // STR W8, [X19, #0x3B4]
+0046E1E0 E8030032   // ORR W8, WZR, #1
+0046E1E4 68C20E39   // STRB W8, [X19, #0x3B0]
+0046E1E8 F7FFFF17   // B 0x46E1C4
+// salvage (0x47149C)
+004714E4 08791F53   // LSL W8, W8, #1
+004714E8 68B603B9   // STR W8, [X19, #0x3B4]
+004714EC E8030032   // ORR W8, WZR, #1
+004714F0 68C20E39   // STRB W8, [X19, #0x3B0]
+004714F4 F7FFFF17   // B 0x4714D0
+// tutorial (0x48D480)
+0048D4C8 08791F53   // LSL W8, W8, #1
+0048D4CC 688602B9   // STR W8, [X19, #0x284]
+0048D4D0 E8030032   // ORR W8, WZR, #1
+0048D4D4 68020A39   // STRB W8, [X19, #0x280]
+0048D4D8 F7FFFF17   // B 0x48D4B4
+// vision (0x4959C4)
+00495A0C 08791F53   // LSL W8, W8, #1
+00495A10 68E604B9   // STR W8, [X19, #0x4E4]
+00495A14 E8030032   // ORR W8, WZR, #1
+00495A18 68821339   // STRB W8, [X19, #0x4E0]
+00495A1C F7FFFF17   // B 0x4959F8
+// zone_telop (0x4A0848)
+004A0890 08791F53   // LSL W8, W8, #1
+004A0894 685601B9   // STR W8, [X19, #0x154]
+004A0898 E8030032   // ORR W8, WZR, #1
+004A089C 68420539   // STRB W8, [X19, #0x150]
+004A08A0 F7FFFF17   // B 0x4A087C
+// Menu countdowns with fixed start values: 2x
+0035174C 08FC191E   // FCVTZU W8, S0, #1 = field skill timer = seconds x 60
+00351D8C 08FC191E   // FCVTZU W8, S0, #1 = field skill timer = seconds x 60
+00351F04 E80F1F32   // ORR W8, WZR, #0x1E = field skill wait 30 (was 15)
+00353268 E8031E32   // ORR W8, WZR, #0x4 = fullscreen wait 4 (was 2)
+003697E0 E90F1E32   // ORR W9, WZR, #0x3C = script manager wait 60 (was 30)
+003BB40C E80F1E32   // ORR W8, WZR, #0x3C = button challenge delay 60 (was 30)
+003F7774 49098052   // MOV W9, #0x4A = element effect 74 (was 37)
+0048D280 48018052   // MOV W8, #0xA = tutorial wait 10 (was 5)
+00447C34 1FE10171   // CMP W8, #0x78 = NPC telop face load limit 120 (was 60)
+00447C40 1FE50171   // CMP W8, #0x79 = NPC telop face load limit 121 (was 61)
+@stop
+
+// The cutscene state, clock, layer and wind sites follow the FPSLocker
+// dynamic patch for this build
+// (https://github.com/masagrator/FPSLocker-Warehouse). Its frame-time
+// measurement is rebuilt here with a 1/60 to 1/30 s clamp.
+// Byte-verified against the IDB.
+//
+// https://github.com/RAMDRAGONS/switch-patches

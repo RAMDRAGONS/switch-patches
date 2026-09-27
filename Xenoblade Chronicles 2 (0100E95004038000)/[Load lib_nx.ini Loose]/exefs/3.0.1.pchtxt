@@ -1,0 +1,21 @@
+@nsobid-4F5C96E2D97F45AC288BC67613EBEF0A
+
+# Xenoblade Chronicles 2 3.0.1 - Load lib_nx.ini Loose
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Loads the renderer settings file from /stream/dumpini/lib_nx.ini instead of
+// /monolib/shader/lib_nx.ini, so an edited copy can be supplied as a loose
+// file at romfs/stream/dumpini/lib_nx.ini in a LayeredFS mod. The game opens
+// lib_nx.ini through a single path string at startup and parses its switches
+// and values into the render settings. The replacement is the same length,
+// so the rest of the string is unchanged.
+@enabled
+// "monolib/shader" -> "stream/dumpini" in "/monolib/shader/lib_nx.ini"
+009AB4D6 73747265616D2F64756D70696E69
+@stop
+
+// Byte-verified against the IDB.
+//
+// https://github.com/RAMDRAGONS/switch-patches
