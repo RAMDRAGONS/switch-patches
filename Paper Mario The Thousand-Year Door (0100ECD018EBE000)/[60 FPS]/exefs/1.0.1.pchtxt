@@ -1,0 +1,395 @@
+@nsobid-0EFFE4AF1DEC3A7966B934D4A7C3D2BF566A9C62
+
+# Paper Mario: The Thousand-Year Door 1.0.1 - 60 FPS
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Runs the game at 60 FPS without the romfs edit the original 60 FPS mod
+// needed. Replaces [60FPS v1.0.1] and [Faster Text Speed v1.0.1].
+//
+// The frame timer measures the step as the number of 60 Hz vsyncs since the
+// last frame, clamped to at least 2. Presenting every vsync and clamping to 1
+// gives a step of 1 at 60 FPS. Almost every system already scales by this
+// step, including scripts, whose waits and loops count 60 Hz frames. The
+// original mod also halved the millisecond step of the scripted MovePos
+// command, which made every such move take twice as long; that is dropped.
+//
+// Message text prints a budget of characters per processed update, charged
+// 2 / step per character, then waits the text speed (24 ms by default) before
+// the next update. At 30 FPS the wait never blocks and each 33 ms update
+// prints the budget. At 60 FPS the wait blocks every other update and each
+// character costs twice as much, so text ran at half speed. Text now waits at
+// least 33 ms between processed updates and charges one unit per character,
+// which reproduces the 30 FPS cadence and keeps longer waits in milliseconds.
+//
+// Mash action commands (Run Away, Goombella's Rally Wink, Yoshi's Ground
+// Pound and Stampede, Koops' Shell Slam, Ms. Mowz's Love Slap, Tease and
+// Smooch, Bobbery's Bob-ombast) fill their gauge in 1/60 s sub-steps and add
+// the press gain in every sub-step of the update that saw the press. A press
+// was worth two sub-steps at 30 FPS and one at 60 FPS while the drain stayed
+// time-based. The gain is now scaled by 2 / vsync count, so a press adds the
+// stock amount at any frame rate. The original mod lowered these moves'
+// difficulty in data_battle_weapon_party instead.
+//
+// Punis move by velocity x min(step, 2), and the mover damps velocity by 0.6
+// per update, so the per-update acceleration reaches the stock top speed at
+// any frame rate. The follow state instead tested per-update movement, which
+// halves at 60 FPS. A puni starting from rest moves 0.1 x an approximate unit
+// direction, which sat on the 0.1 stop limit and stopped it before it moved;
+// moving punis also dropped to their idle state, and the give-up timer ran
+// whenever a puni closed on its leader by less than 0.01 per update. The stop
+// test now reads the velocity (below 0.05), and the moving and progress
+// thresholds are scaled by min(step, 2), which matches 30 FPS.
+//
+// Other puni states count updates. The group's frame counter gains 1.0 per
+// update and drives sprite animation frames, bob phases and every-fourth-
+// frame scheduling; it now gains min(step, 2) / 2. The jump and fall states
+// move by velocity and add -0.045 gravity once per update, and the slide
+// state moves by its speed once per update; both now scale by
+// min(step, 2) / 2. Puni sprites turn a quarter of the way toward the camera
+// each update; at 60 FPS they turn 1 - sqrt(0.75) per update, which gives the
+// same turn per 1/30 s.
+//
+// The Paper Game runners run native AI that counts updates rather than time
+// (gravity, fan push and animation blends per update), so it runs as a fixed
+// 30 Hz tick: the game step accumulates, and each time it reaches 2 the
+// update runs with every step value set to 2.
+// Each runner is then shown between its last two computed positions by the
+// leftover fraction, one tick behind, so runners move smoothly and late
+// frames do not hitch. A runner is only moved while it still shows the last
+// blended position, so resets and scripted moves are left alone, and jumps of
+// more than 20 units snap instead of blending. The blend state lives in the
+// unused tail of the last .bss page.
+//
+// The added code sits in three dead static initialisers with no code or data
+// references, and in repeated static-init blocks of sub_71004780D0 that never
+// run because an earlier check of the same guard dominates them.
+@enabled
+// Frame rate: present every vsync, step of 1 vsync
+00204740 35008052   // MOV W21, #0x1 = swap interval 1 (was MOV W21, W2)
+002E77A4 29008052   // MOV W9, #0x1 = minimum vsync count 1 (was MOV W9, #2)
+002E77CC 1F050071   // CMP W8, #0x1 = minimum vsync count 1 (was CMP W8, #2)
+// Message text: keep the 30 FPS typewriter cadence
+00296760 08608952   // MOV W8, #0x4B00 = 19200 ticks per ms (was BL nn::os::ConvertToTimeSpan)
+00296764 6932A4B9   // LDRSW X9, [X19, #0x2430] (was MOV W8, #0x4240)
+00296768 080CC89A   // SDIV X8, X0, X8 (was MOVK W8, #0xF, LSL #16)
+0029676C 1F8500F1   // CMP X8, #0x21 = at least 33 ms since the last processed update (was LDRSW X9, [X19, #0x2430])
+00296770 08A149FA   // CCMP X8, X9, #0x8, GE = and at least the per-character wait (was SDIV X8, X0, X8)
+00296774 6B8B0054   // B.LT 0x2978E0 (was CMP X8, X9)
+00296778 1F2003D5   // NOP (was B.LT 0x2978E0)
+00296CC0 00103E1E   // FMOV S0, #-1.00000000 = one budget unit per character (was FDIV S0, S13, S0)
+// Mash action commands: same gauge gain per press at any frame rate
+0046DEF4 EBE91194   // BL 0x8E86A0 = press gain (ACTYPE_REPEATEDLY) (was FMUL S4, S3, S7)
+004718E0 78DB1194   // BL 0x8E86C0 = press gain (ACTYPE_REPEATEDLY_LV) (was FMUL S7, S3, S4)
+008E86A0 103100F0   // ADRP X16, 0xF0B000
+008E86A4 105247F9   // LDR X16, [X16, #0xEA0]
+008E86A8 100240F9   // LDR X16, [X16]
+008E86AC 103240BD   // LDR S16, [X16, #0x30]
+008E86B0 7018301E   // FDIV S16, S3, S16
+008E86B4 102A301E   // FADD S16, S16, S16
+008E86B8 040A271E   // FMUL S4, S16, S7
+008E86BC C0035FD6   // RET
+008E86C0 103100F0   // ADRP X16, 0xF0B000
+008E86C4 105247F9   // LDR X16, [X16, #0xEA0]
+008E86C8 100240F9   // LDR X16, [X16]
+008E86CC 103240BD   // LDR S16, [X16, #0x30]
+008E86D0 7018301E   // FDIV S16, S3, S16
+008E86D4 102A301E   // FADD S16, S16, S16
+008E86D8 070A241E   // FMUL S7, S16, S4
+008E86DC C0035FD6   // RET
+// Scripted MovePos: round per-update milliseconds
+0059B89C 0801241E   // FCVTAS W8, S8 = round the per-update milliseconds (was FCVTZS W8, S8)
+// Paper Game runners: fixed 30 Hz tick, positions blended every frame
+0047B560 FD7BBBA9   // STP X29, X30, [SP, #-0x50]!
+0047B564 FD030091   // MOV X29, SP
+0047B568 F35301A9   // STP X19, X20, [SP, #0x10]
+0047B56C F55B02A9   // STP X21, X22, [SP, #0x20]
+0047B570 F76303A9   // STP X23, X24, [SP, #0x30]
+0047B574 E827046D   // STP D8, D9, [SP, #0x40]
+0047B578 F30C0190   // ADRP X19, 0x2617000
+0047B57C 73021091   // ADD X19, X19, #0x400
+0047B580 885400B0   // ADRP X8, 0xF0C000
+0047B584 087940F9   // LDR X8, [X8, #0xF0]
+0047B588 080140F9   // LDR X8, [X8]
+0047B58C 08114091   // ADD X8, X8, #0x4, LSL #12
+0047B590 09956639   // LDRB W9, [X8, #0x9A5]
+0047B594 08794ABD   // LDR S8, [X8, #0xA78]
+0047B598 EA0601F0   // ADRP X10, 0x255A000
+0047B59C 4A012D91   // ADD X10, X10, #0xB40
+0047B5A0 4B410291   // ADD X11, X10, #0x90
+0047B5A4 3F010071   // CMP W9, #0x0
+0047B5A8 4A018B9A   // CSEL X10, X10, X11, EQ
+0047B5AC 540140B9   // LDR W20, [X10]
+0047B5B0 550540F9   // LDR X21, [X10, #0x8]
+0047B5B4 B5C20191   // ADD X21, X21, #0x70
+0047B5B8 09048052   // MOV W9, #0x20
+0047B5BC 9F02096B   // CMP W20, W9
+0047B5C0 94D2891A   // CSEL W20, W20, W9, LE
+0047B5C4 947EB40A   // BIC W20, W20, W20, ASR #31
+0047B5C8 690240B9   // LDR W9, [X19]
+0047B5CC 6A0640B9   // LDR W10, [X19, #0x4]
+0047B5D0 6B0640F9   // LDR X11, [X19, #0x8]
+0047B5D4 5F01146B   // CMP W10, W20
+0047B5D8 600155FA   // CCMP X11, X21, #0x0, EQ
+0047B5DC 36019F1A   // CSEL W22, W9, WZR, EQ
+0047B5E0 740600B9   // STR W20, [X19, #0x4]
+0047B5E4 750600F9   // STR X21, [X19, #0x8]
+0047B5E8 18008052   // MOV W24, #0x0
+0047B5EC 691240BD   // LDR S9, [X19, #0x10]
+0047B5F0 2929281E   // FADD S9, S9, S8
+0047B5F4 0010201E   // FMOV S0, #2.00000000
+0047B5F8 DF020071   // CMP W22, #0x0
+0047B5FC 291D201E   // FCSEL S9, S9, S0, NE
+0047B600 2021201E   // FCMP S9, S0
+0047B604 8B060054   // B.LT 0x47B6D4
+0047B608 52000094   // BL 0x47B750
+0047B60C 57008052   // MOV W23, #0x2
+0047B610 E90315AA   // MOV X9, X21
+0047B614 6A020191   // ADD X10, X19, #0x40
+0047B618 EB03142A   // MOV W11, W20
+0047B61C EB000034   // CBZ W11, 0x47B638
+0047B620 2001C03D   // LDR Q0, [X9]
+0047B624 4001803D   // STR Q0, [X10]
+0047B628 29010391   // ADD X9, X9, #0xC0
+0047B62C 4AC10091   // ADD X10, X10, #0x30
+0047B630 6B050071   // SUBS W11, W11, #0x1
+0047B634 61FFFF54   // B.NE 0x47B620
+0047B638 89540090   // ADRP X9, 0xF0B000
+0047B63C 295147F9   // LDR X9, [X9, #0xEA0]
+0047B640 290140F9   // LDR X9, [X9]
+0047B644 213140BD   // LDR S1, [X9, #0x30]
+0047B648 0010201E   // FMOV S0, #2.00000000
+0047B64C 0018211E   // FDIV S0, S0, S1
+0047B650 51000094   // BL 0x47B794
+0047B654 2FAA1694   // BL 0xA25F10
+0047B658 71000094   // BL 0x47B81C
+0047B65C E90315AA   // MOV X9, X21
+0047B660 6A020191   // ADD X10, X19, #0x40
+0047B664 EB03142A   // MOV W11, W20
+0047B668 0C79A852   // MOV W12, #0x43C80000
+0047B66C 8301271E   // FMOV S3, W12
+0047B670 EB010034   // CBZ W11, 0x47B6AC
+0047B674 2101C03D   // LDR Q1, [X9]
+0047B678 4001C03D   // LDR Q0, [X10]
+0047B67C 4105803D   // STR Q1, [X10, #0x10]
+0047B680 22D4A04E   // FSUB V2.4S, V1.4S, V0.4S
+0047B684 42DC226E   // FMUL V2.4S, V2.4S, V2.4S
+0047B688 42D4226E   // FADDP V2.4S, V2.4S, V2.4S
+0047B68C 42D8307E   // FADDP S2, V2.2S
+0047B690 4020231E   // FCMP S2, S3
+0047B694 4D000054   // B.LE 0x47B69C
+0047B698 4101803D   // STR Q1, [X10]
+0047B69C 29010391   // ADD X9, X9, #0xC0
+0047B6A0 4AC10091   // ADD X10, X10, #0x30
+0047B6A4 6B050071   // SUBS W11, W11, #0x1
+0047B6A8 61FEFF54   // B.NE 0x47B674
+0047B6AC 38008052   // MOV W24, #0x1
+0047B6B0 36008052   // MOV W22, #0x1
+0047B6B4 0010201E   // FMOV S0, #2.00000000
+0047B6B8 2939201E   // FSUB S9, S9, S0
+0047B6BC F7060071   // SUBS W23, W23, #0x1
+0047B6C0 60000054   // B.EQ 0x47B6CC
+0047B6C4 2021201E   // FCMP S9, S0
+0047B6C8 4AFAFF54   // B.GE 0x47B610
+0047B6CC 00102E1E   // FMOV S0, #1.00000000
+0047B6D0 2959201E   // FMIN S9, S9, S0
+0047B6D4 691200BD   // STR S9, [X19, #0x10]
+0047B6D8 760200B9   // STR W22, [X19]
+0047B6DC F6020034   // CBZ W22, 0x47B738
+0047B6E0 03102C1E   // FMOV S3, #0.50000000
+0047B6E4 2309231E   // FMUL S3, S9, S3
+0047B6E8 E90315AA   // MOV X9, X21
+0047B6EC 6A020191   // ADD X10, X19, #0x40
+0047B6F0 EB03142A   // MOV W11, W20
+0047B6F4 2B020034   // CBZ W11, 0x47B738
+0047B6F8 D8000035   // CBNZ W24, 0x47B710
+0047B6FC 2C3540A9   // LDP X12, X13, [X9]
+0047B700 4E3D42A9   // LDP X14, X15, [X10, #0x20]
+0047B704 9F010EEB   // CMP X12, X14
+0047B708 A0014FFA   // CCMP X13, X15, #0x0, EQ
+0047B70C E1000054   // B.NE 0x47B728
+0047B710 4001C03D   // LDR Q0, [X10]
+0047B714 4105C03D   // LDR Q1, [X10, #0x10]
+0047B718 21D4A04E   // FSUB V1.4S, V1.4S, V0.4S
+0047B71C 2010834F   // FMLA V0.4S, V1.4S, V3.S[0]
+0047B720 2001803D   // STR Q0, [X9]
+0047B724 4009803D   // STR Q0, [X10, #0x20]
+0047B728 29010391   // ADD X9, X9, #0xC0
+0047B72C 4AC10091   // ADD X10, X10, #0x30
+0047B730 6B050071   // SUBS W11, W11, #0x1
+0047B734 21FEFF54   // B.NE 0x47B6F8
+0047B738 E827446D   // LDP D8, D9, [SP, #0x40]
+0047B73C F76343A9   // LDP X23, X24, [SP, #0x30]
+0047B740 F55B42A9   // LDP X21, X22, [SP, #0x20]
+0047B744 F35341A9   // LDP X19, X20, [SP, #0x10]
+0047B748 FD7BC5A8   // LDP X29, X30, [SP], #0x50
+0047B74C C0035FD6   // RET
+0047B750 16020034   // CBZ W22, 0x47B790
+0047B754 E90315AA   // MOV X9, X21
+0047B758 6A020191   // ADD X10, X19, #0x40
+0047B75C EB03142A   // MOV W11, W20
+0047B760 8B010034   // CBZ W11, 0x47B790
+0047B764 2C3540A9   // LDP X12, X13, [X9]
+0047B768 4E3D42A9   // LDP X14, X15, [X10, #0x20]
+0047B76C 9F010EEB   // CMP X12, X14
+0047B770 A0014FFA   // CCMP X13, X15, #0x0, EQ
+0047B774 61000054   // B.NE 0x47B780
+0047B778 4105C03D   // LDR Q1, [X10, #0x10]
+0047B77C 2101803D   // STR Q1, [X9]
+0047B780 29010391   // ADD X9, X9, #0xC0
+0047B784 4AC10091   // ADD X10, X10, #0x30
+0047B788 6B050071   // SUBS W11, W11, #0x1
+0047B78C C1FEFF54   // B.NE 0x47B764
+0047B790 C0035FD6   // RET
+0047B794 F10C0190   // ADRP X17, 0x2617000
+0047B798 31021091   // ADD X17, X17, #0x400
+0047B79C 905400B0   // ADRP X16, 0xF0C000
+0047B7A0 107A40F9   // LDR X16, [X16, #0xF0]
+0047B7A4 100240F9   // LDR X16, [X16]
+0047B7A8 10124091   // ADD X16, X16, #0x4, LSL #12
+0047B7AC 107A4ABD   // LDR S16, [X16, #0xA78]
+0047B7B0 301600BD   // STR S16, [X17, #0x14]
+0047B7B4 100A201E   // FMUL S16, S16, S0
+0047B7B8 107A0ABD   // STR S16, [X16, #0xA78]
+0047B7BC 90540090   // ADRP X16, 0xF0B000
+0047B7C0 105247F9   // LDR X16, [X16, #0xEA0]
+0047B7C4 100240F9   // LDR X16, [X16]
+0047B7C8 103240BD   // LDR S16, [X16, #0x30]
+0047B7CC 301A00BD   // STR S16, [X17, #0x18]
+0047B7D0 100A201E   // FMUL S16, S16, S0
+0047B7D4 103200BD   // STR S16, [X16, #0x30]
+0047B7D8 106A40BD   // LDR S16, [X16, #0x68]
+0047B7DC 301E00BD   // STR S16, [X17, #0x1C]
+0047B7E0 100A201E   // FMUL S16, S16, S0
+0047B7E4 106A00BD   // STR S16, [X16, #0x68]
+0047B7E8 10A240BD   // LDR S16, [X16, #0xA0]
+0047B7EC 302200BD   // STR S16, [X17, #0x20]
+0047B7F0 100A201E   // FMUL S16, S16, S0
+0047B7F4 10A200BD   // STR S16, [X16, #0xA0]
+0047B7F8 10DA40BD   // LDR S16, [X16, #0xD8]
+0047B7FC 302600BD   // STR S16, [X17, #0x24]
+0047B800 100A201E   // FMUL S16, S16, S0
+0047B804 10DA00BD   // STR S16, [X16, #0xD8]
+0047B808 101241BD   // LDR S16, [X16, #0x110]
+0047B80C 302A00BD   // STR S16, [X17, #0x28]
+0047B810 100A201E   // FMUL S16, S16, S0
+0047B814 101201BD   // STR S16, [X16, #0x110]
+0047B818 C0035FD6   // RET
+0047B81C F10C0190   // ADRP X17, 0x2617000
+0047B820 31021091   // ADD X17, X17, #0x400
+0047B824 905400B0   // ADRP X16, 0xF0C000
+0047B828 107A40F9   // LDR X16, [X16, #0xF0]
+0047B82C 100240F9   // LDR X16, [X16]
+0047B830 10124091   // ADD X16, X16, #0x4, LSL #12
+0047B834 301640BD   // LDR S16, [X17, #0x14]
+0047B838 107A0ABD   // STR S16, [X16, #0xA78]
+0047B83C 90540090   // ADRP X16, 0xF0B000
+0047B840 105247F9   // LDR X16, [X16, #0xEA0]
+0047B844 100240F9   // LDR X16, [X16]
+0047B848 301A40BD   // LDR S16, [X17, #0x18]
+0047B84C 103200BD   // STR S16, [X16, #0x30]
+0047B850 301E40BD   // LDR S16, [X17, #0x1C]
+0047B854 106A00BD   // STR S16, [X16, #0x68]
+0047B858 302240BD   // LDR S16, [X17, #0x20]
+0047B85C 10A200BD   // STR S16, [X16, #0xA0]
+0047B860 302640BD   // LDR S16, [X17, #0x24]
+0047B864 10DA00BD   // STR S16, [X16, #0xD8]
+0047B868 302A40BD   // LDR S16, [X17, #0x28]
+0047B86C 101201BD   // STR S16, [X16, #0x110]
+0047B870 C0035FD6   // RET
+00A24B1C A3D2FFF0   // ADRP X3, 0x47B000 = RunnerAI update through runner_interp (was ADRP X3, 0xA25000)
+00A24B20 63801591   // ADD X3, X3, #0x560 (was ADD X3, X3, #0xF10)
+// Puni follow: stop, moving and progress tests match 30 FPS
+0084FD8C 48B3A752   // MOV W8, #0x3D9A0000 = moving threshold 0.075 (was MOV W8, #0x999A)
+0084FD90 60F240BD   // LDR S0, [X19, #0xF0] (was MOVK W8, #0x3E19, LSL #16)
+0084FD94 0101271E   // FMOV S1, W8 (was LDR S0, [X19, #0xF0])
+0084FD98 2108281E   // FMUL S1, S1, S8 = x min(step, 2) (was FMOV S1, W8)
+0084FE40 8974A752   // MOV W9, #0x3BA40000 = progress threshold 0.005 (was MOV W9, #0xD70B)
+0084FE44 60EE40BD   // LDR S0, [X19, #0xEC] (was MOVK W9, #0x3C23, LSL #16)
+0084FE48 2101271E   // FMOV S1, W9 (was LDR S0, [X19, #0xEC])
+0084FE4C 2108281E   // FMUL S1, S1, S8 = x min(step, 2) (was FMOV S1, W9)
+0084FEDC 49B3A752   // MOV W9, #0x3D9A0000 = moving threshold 0.075 (was MOV W9, #0x999A)
+0084FEE0 60F240BD   // LDR S0, [X19, #0xF0] (was MOVK W9, #0x3E19, LSL #16)
+0084FEE4 2101271E   // FMOV S1, W9 (was LDR S0, [X19, #0xF0])
+0084FEE8 2108281E   // FMUL S1, S1, S8 = x min(step, 2) (was FMOV S1, W9)
+00A2F418 E644046E   // MOV V6.S[0], V7.S[2] = stop test reads velocity Z (was INS V6.S[0], V2.S[2])
+00A2F420 89A9A772   // MOVK W9, #0x3D4C, LSL #16 = stop below 0.05 velocity (was MOVK W9, #0x3DCC, LSL #16)
+00A2F428 E004046E   // MOV V0.S[0], V7.S[0] = stop test reads velocity X (was INS V0.S[0], V2.S[0])
+// Puni animation counter, jumps, slides and billboard turn
+0047B874 8A5400B0   // ADRP X10, 0xF0C000
+0047B878 4A7940F9   // LDR X10, [X10, #0xF0]
+0047B87C 4A0140F9   // LDR X10, [X10]
+0047B880 4A114091   // ADD X10, X10, #0x4, LSL #12
+0047B884 41794ABD   // LDR S1, [X10, #0xA78]
+0047B888 0210201E   // FMOV S2, #2.00000000
+0047B88C 2158221E   // FMIN S1, S1, S2
+0047B890 02102C1E   // FMOV S2, #0.50000000
+0047B894 2108221E   // FMUL S1, S1, S2
+0047B898 C0035FD6   // RET
+0047B89C FD7BBDA9   // STP X29, X30, [SP, #-0x30]!
+0047B8A0 FD030091   // MOV X29, SP
+0047B8A4 F30B00F9   // STR X19, [SP, #0x10]
+0047B8A8 E81300FD   // STR D8, [SP, #0x20]
+0047B8AC F30301AA   // MOV X19, X1
+0047B8B0 F1FFFF97   // BL 0x47B874
+0047B8B4 2840201E   // FMOV S8, S1
+0047B8B8 6026C03D   // LDR Q0, [X19, #0x90]
+0047B8BC 693D8A52   // MOV W9, #0x51EB
+0047B8C0 09A7A772   // MOVK W9, #0x3D38, LSL #16
+0047B8C4 3001271E   // FMOV S16, W9
+0047B8C8 11102E1E   // FMOV S17, #1.00000000
+0047B8CC 313A281E   // FSUB S17, S17, S8
+0047B8D0 100A311E   // FMUL S16, S16, S17
+0047B8D4 11040C5E   // MOV S17, V0.S[1]
+0047B8D8 312A301E   // FADD S17, S17, S16
+0047B8DC 20060C6E   // MOV V0.S[1], V17.S[0]
+0047B8E0 0090884F   // FMUL V0.4S, V0.4S, V8.S[0]
+0047B8E4 6026803D   // STR Q0, [X19, #0x90]
+0047B8E8 4DD31694   // BL 0xA3061C
+0047B8EC 6026C03D   // LDR Q0, [X19, #0x90]
+0047B8F0 0105044E   // DUP V1.4S, V8.S[0]
+0047B8F4 00FC216E   // FDIV V0.4S, V0.4S, V1.4S
+0047B8F8 6026803D   // STR Q0, [X19, #0x90]
+0047B8FC E81340FD   // LDR D8, [SP, #0x20]
+0047B900 F30B40F9   // LDR X19, [SP, #0x10]
+0047B904 FD7BC3A8   // LDP X29, X30, [SP], #0x30
+0047B908 C0035FD6   // RET
+0047B90C 905400B0   // ADRP X16, 0xF0C000
+0047B910 107A40F9   // LDR X16, [X16, #0xF0]
+0047B914 100240F9   // LDR X16, [X16]
+0047B918 10124091   // ADD X16, X16, #0x4, LSL #12
+0047B91C 107A4ABD   // LDR S16, [X16, #0xA78]
+0047B920 0110201E   // FMOV S1, #2.00000000
+0047B924 105A211E   // FMIN S16, S16, S1
+0047B928 01102C1E   // FMOV S1, #0.50000000
+0047B92C 100A211E   // FMUL S16, S16, S1
+0047B930 61D240BD   // LDR S1, [X19, #0xD0]
+0047B934 2108301E   // FMUL S1, S1, S16
+0047B938 C0035FD6   // RET
+0047B93C 905400B0   // ADRP X16, 0xF0C000
+0047B940 107A40F9   // LDR X16, [X16, #0xF0]
+0047B944 100240F9   // LDR X16, [X16]
+0047B948 10124091   // ADD X16, X16, #0x4, LSL #12
+0047B94C 007A4ABD   // LDR S0, [X16, #0xA78]
+0047B950 0A102F1E   // FMOV S10, #1.50000000
+0047B954 00202A1E   // FCMP S0, S10
+0047B958 0A102A1E   // FMOV S10, #0.25000000
+0047B95C 70148652   // MOV W16, #0x30A3
+0047B960 30C1A772   // MOVK W16, #0x3E09, LSL #16
+0047B964 0002271E   // FMOV S0, W16
+0047B968 0ABC2A1E   // FCSEL S10, S0, S10, LT
+0047B96C C0035FD6   // RET
+008417D4 28E8F097   // BL 0x47B874 = frame counter gains min(step, 2) / 2 (was FMOV S1, #1.0)
+00841828 13E8F097   // BL 0x47B874 = frame counter gains min(step, 2) / 2 (was FMOV S1, #1.0)
+0085A954 EE83F097   // BL 0x47B90C = slide speed x min(step, 2) / 2 (was LDR S1, [X19, #0xD0])
+0085D220 9F79F097   // BL 0x47B89C = jump mover with scaled velocity and gravity (was BL 0xA3061C)
+00862F44 5662F097   // BL 0x47B89C = jump mover with scaled velocity and gravity (was BL 0xA3061C)
+00A90780 6FACE797   // BL 0x47B93C = billboard turn fraction per update (was FMOV S10, #0.25)
+@stop
+
+// Swap interval site from the 60FPS mod by Fl4sh
+// (https://github.com/Fl4sh9174). Everything else reverse-engineered against
+// 1.0.1 and byte-verified against the IDB.
+//
+// https://github.com/RAMDRAGONS/switch-patches

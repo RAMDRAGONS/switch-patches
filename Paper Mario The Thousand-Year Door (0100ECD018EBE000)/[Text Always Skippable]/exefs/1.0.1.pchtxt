@@ -1,0 +1,22 @@
+@nsobid-0EFFE4AF1DEC3A7966B934D4A7C3D2BF566A9C62
+
+# Paper Mario: The Thousand-Year Door 1.0.1 - Text Always Skippable
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Lets every message be fast-forwarded, including ones not seen before.
+//
+// When a message opens, the message window marks it skippable only if
+// sub_710029A848 finds the message's hashed id in the list of messages
+// already shown. The check now always succeeds.
+
+@enabled
+0029A848 200080D2   // MOV X0, #1 = already shown (was SUB SP, SP, #0x60)
+0029A84C C0035FD6   // RET (was STP X29, X30, [SP, #0x30])
+@stop
+
+// Original cheat by NatalieWhatever. Ported to pchtxt and verified against
+// 1.0.1.
+//
+// https://github.com/RAMDRAGONS/switch-patches
