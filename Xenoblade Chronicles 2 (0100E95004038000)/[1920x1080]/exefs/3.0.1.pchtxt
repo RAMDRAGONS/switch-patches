@@ -21,6 +21,17 @@
 // out in that space: debug overlays and desktop windows, and the aspect ratio
 // of the 3D and menu cameras.
 //
+// The UI layer's size getters return the render target size, but the game UI
+// uses them as the 1280x720 layout size: screen-edge placement of panes,
+// stretch-to-screen scales and position clamps. They return the layout size
+// instead, which is what they return at stock.
+//
+// Panes that size themselves to their children (the full-screen map) take
+// that size from the children's screen bounds times the target size, which
+// gives render-target pixels. The pane transform treats the size as 1280x720
+// layout pixels when it scales around the center, so the zoomed map slid
+// toward the top left. The bounds are multiplied by the layout size instead.
+//
 // Screen-space effects are authored in 1280x720 pixels. The effect library
 // builds its screen-space projection, the pixel scale of 2D particles, and the
 // rectangles of its full-screen blits and zoom blur by dividing by the real
@@ -51,6 +62,14 @@
 // Renderer's initial viewport size.
 006FFE28 089EA852   // MOV W8, #0x44F00000 = 1920.0 (was 1280.0)
 006FFE30 E890A852   // MOV W8, #0x44870000 = 1080.0 (was 720.0)
+// UI layer size getters return the 1280x720 layout size.
+008269FC 005145BD   // LDR S0, [X8, #0x550] = layout width (was LDR S0,[X8,#0x530])
+00826A14 005545BD   // LDR S0, [X8, #0x554] = layout height (was LDR S0,[X8,#0x534])
+// Child-sized pane bounds in 1280x720 layout pixels.
+00832DFC 015145BD   // LDR S1, [X8, #0x550] = layout width, left (was LDR S1,[X8,#0x530])
+00832E10 015545BD   // LDR S1, [X8, #0x554] = layout height, top (was LDR S1,[X8,#0x534])
+00832E24 015145BD   // LDR S1, [X8, #0x550] = layout width, right (was LDR S1,[X8,#0x530])
+00832E38 015545BD   // LDR S1, [X8, #0x554] = layout height, bottom (was LDR S1,[X8,#0x534])
 // Dynamic resolution: max, min and current scales all 1.0.
 007E3394 08F0A752   // MOV W8, #0x3F800000 = max x (was 0.94)
 007E3398 08008072   // MOVK W8, #0x0 = low half (was MOVK W8,#0xA3D7)
