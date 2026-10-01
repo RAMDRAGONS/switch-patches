@@ -33,6 +33,15 @@ same GPU pool as §2b, so read them together) and `switch-framerate-pchtxt`
 Deliver patches as pchtxt only. Never modify the game dump. Open IDBs **in place**
 (no copies).
 
+**IDA access.** Use the IDA MCP (`open_database`, then `execute_python`) with the
+helpers from the `using-ida-mcp`, `analyzing-switch-arm64-in-ida` and
+`writing-switch-pchtxt` skills, loaded in the first `execute_python` call after
+each open (their SKILL.md files give the lines). Back the IDB up before the first
+open in a session (`cp main.i64 main.i64.bak`): repeated open/close repacks once
+corrupted Captain Toad's IDB. Calls such as `dec`, `dis`, `hb`, `xr`, `callers`,
+`sref`, `strs`, `funcs`, `find`, `find_wide` and `pchtxt_check` below are those
+helpers.
+
 ## 0. pchtxt format (Ryujinx `IPSwitchPatcher`)
 
 ```
@@ -59,10 +68,10 @@ Rules that bite you:
   subtracts the NSO `protectedOffset = 0x100`. So with `@flag offset_shift 0x100`
   set, **the pchtxt offset equals the file RVA** — write RVAs directly, do not add
   0x100 yourself. This is the convention the community retail mods use; match it.
-- **RVA from an IDB address**: `RVA = IDB_addr - imagebase`. For these Blitz IDBs
-  the image loads at `0x7100000000` (even when the health probe reports
-  `imagebase 0x0`), so `RVA = addr - 0x7100000000`. Verify empirically against a
-  known instruction before trusting it.
+- **RVA from an IDB address**: `rva(ea)`. `info()` prints the real image base:
+  these Blitz IDBs load at `0x7100000000` even when the database records
+  imagebase 0, and `rva()` corrects for that. `print(pchtxt(ea, data))` writes the
+  line directly.
 - Filename is arbitrary; Ryujinx matches by `@nsobid` only. Name files
   `<BUILDID>.pchtxt`. `.bak` files are ignored (loader matches `.pchtxt`/`.ips`
   by exact extension).
@@ -89,13 +98,14 @@ Observed:
 - March dev (720p):   slot0 = `MOVZ X9,#0x2D0,LSL#32` (height), slot1 = `MOVK X9,#0x500` (width).
 
 ### Finding it
-1. If the build renders 1080p, search bytes for the height MOVK `?? 87 C0 F2`
-   (`MOVK X9,#0x438,LSL#32`). If 720p, search `?? 5A C0 ??` or just find the
-   function by symbol.
-2. Best: `search_text` for `ScanBuffer` — the demangled getter name pins it
-   immediately, then `disasm` the function and read the two-instruction packed MOV
-   and its two RVAs. `get_bytes` the 8 bytes to confirm the exact encoding/order
-   of each 4-byte slot.
+1. `pp(find_wide(0x43800000780))` (1080p; `0x2D000000500` for 720p) lists the
+   collapsed `MOV X9,#...` slots and the split `MOVZ`/`MOVK` halves in one pass.
+   Masked byte searches still work: `find("?? 87 C0 F2")` for the height MOVK
+   (`MOVK X9,#0x438,LSL#32`), `find("?? 5A C0 ??")` for 720p.
+2. Best on symbol builds: `pp(funcs(r'getScanBufferSize'))` pins the getter, then
+   `print(dec(f, addrs=True))` shows the packed constant with the addresses of its
+   two slots. `print(hb(ea, 8)); print(dis(ea, 2))` confirms the exact encoding and
+   order of each 4-byte slot.
 
 ### Scan-out size and render size can be two different constants
 Do not assume this constant is *the* resolution. In the oldest Blitz build it drives
@@ -123,9 +133,10 @@ The failure modes are diagnostic, so test with screenshots and read them togethe
 **Anchor for finding where the render size is consumed:** the render-target
 allocator usually names its buffers. In gsys, one function allocates both
 `"gsys::RenderBuffer::depth"` and `"gsys::RenderBuffer::color"` from the dynamic
-texture allocator, sized from a viewport float pair it was handed. String-xref
-those two literals, decompile the single caller, and walk backwards from the
-width/height arguments — that path terminates at the true render-size field.
+texture allocator, sized from a viewport float pair it was handed.
+`pp(sref(r'gsys::RenderBuffer::(depth|color)'))` finds it; `print(dec(caller,
+addrs=True))` on its single caller, then walk backwards from the width/height
+arguments — that path terminates at the true render-size field.
 
 **Engines that already separate pixels from layout are the easy case.** Look at the
 render-target constructor: if it stores a *base pixel size* (ints) **and** a
@@ -527,14 +538,17 @@ Sanity values from Splatoon 3, useful as encoder self-tests:
 `MOVZ W9,#0x3000,LSL#16` (768 MB) = `0900A652`, `B -0x58` = `EAFFFF17`.
 
 ## 4. Verification checklist (do every time)
-1. `get_bytes` the original slots; confirm register, encoding, and slot order.
+1. `print(hb(ea, 8)); print(dis(ea, 2))` on the original slots; confirm register,
+   encoding, and slot order.
 2. Recompute your replacement words and re-derive the memory-order hex; sanity-check
    one known value against a reference mod.
 3. Confirm the `@nsobid` against the NSO ModuleId (file offset 0x40, trailing zeros
    trimmed) — a wrong build id means the patch silently never applies. In a
    Ryujinx run log the tell is whether `IPSwitch:` reports the build-id match.
 4. Re-read the written file: contiguous `@enabled` block (comment lines are fine
-   between patch lines; a **blank** line ends the block), CRLF, RVA offsets.
+   between patch lines; a **blank** line ends the block), CRLF, RVA offsets. Then
+   run `pchtxt_check(path)` against the IDB: it decodes every record before and
+   after, and warns about blank-line-disabled records and records outside `.text`.
 5. For any above-native resolution, confirm the matching pool, graphics-heap and
    system-heap patches are present (§2b) or expect an allocator/heap abort.
 6. If the build derives its 2D canvas from the scan buffer, confirm the canvas pin

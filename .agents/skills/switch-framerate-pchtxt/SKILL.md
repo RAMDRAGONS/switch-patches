@@ -17,6 +17,15 @@ endings, and see §0 of `switch-resolution-pchtxt` for the pchtxt format itself
 (`@nsobid`, `@flag offset_shift 0x100` so offsets are raw RVAs, blank lines
 resetting `@enabled`).
 
+**IDA access.** Use the IDA MCP (`open_database`, then `execute_python`) with the
+helpers from the `using-ida-mcp`, `analyzing-switch-arm64-in-ida` and
+`writing-switch-pchtxt` skills, loaded in the first `execute_python` call after
+each open (their SKILL.md files give the lines). Back the IDB up before the first
+open in a session (`cp main.i64 main.i64.bak`): repeated open/close repacks once
+corrupted Captain Toad's IDB. Calls such as `dec`, `dis`, `hb`, `xr`, `callers`,
+`sref`, `strs`, `funcs`, `find`, `find_wide` and `pchtxt_check` below are those
+helpers.
+
 ## 1. Find the pacer before you look for a number
 
 The instinct is to search for the constant `60`. Usually there isn't one. Frame
@@ -143,8 +152,9 @@ emulator's VSync setting.
 
 ## 6. Verification
 1. Re-derive every rewritten instruction's original bytes with your encoder and
-   compare against `get_bytes` — especially any `BL` (§2).
-2. Confirm the target of a retargeted call is a real, *used* PLT stub: xref it
+   compare against `hb(ea, n)`, especially any `BL` (§2). `pchtxt_check(path)`
+   decodes every record with its branch targets resolved.
+2. Confirm the target of a retargeted call is a real, *used* PLT stub: `pp(xr(stub))`
    and check other code already calls it, which proves the relocation resolves.
 3. Measure with the emulator's FPS readout, not by eye, and check it holds in
    both menus and gameplay — a rate that is right in one and wrong in the other

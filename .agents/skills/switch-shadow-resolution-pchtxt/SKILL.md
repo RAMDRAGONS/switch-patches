@@ -16,6 +16,15 @@ blocky. Derived working on the Splatoon 2 / Blitz (gsys + agl `sdw`) engine.
 Deliver patches as pchtxt only. Never modify the game dump. Open IDBs **in place**
 (no copies).
 
+**IDA access.** Use the IDA MCP (`open_database`, then `execute_python`) with the
+helpers from the `using-ida-mcp`, `analyzing-switch-arm64-in-ida` and
+`writing-switch-pchtxt` skills, loaded in the first `execute_python` call after
+each open (their SKILL.md files give the lines). Back the IDB up before the first
+open in a session (`cp main.i64 main.i64.bak`): repeated open/close repacks once
+corrupted Captain Toad's IDB. Calls such as `dec`, `dis`, `hb`, `xr`, `callers`,
+`sref`, `strs`, `funcs`, `find`, `find_wide` and `pchtxt_check` below are those
+helpers.
+
 Related: `switch-resolution-pchtxt` (render resolution — **read its §2b**, the
 shadow map competes for the same GPU pool) and `switch-lod-bias-pchtxt`.
 
@@ -32,7 +41,8 @@ shadow map competes for the same GPU pool) and `switch-lod-bias-pchtxt`.
 @stop
 ```
 A **blank** line ends an `@enabled` block (comment lines do not). CRLF line
-endings. `RVA = IDB_addr - imagebase` (Blitz IDBs load at `0x7100000000`).
+endings. `RVA = rva(ea)`; `info()` prints the real base (Blitz IDBs load at
+`0x7100000000`).
 
 ## 1. Where the size actually comes from
 
@@ -116,21 +126,25 @@ Failure signature is the pool one: abort in
 `"[%s] alloc failed from [%s]. alloc size:%d free size:%d"`.
 
 ## 4. Finding it in a new build
-1. Search the mangled-name/string area for `ShadowMap` / `DepthShadow` to confirm
-   the engine uses `agl::sdw`. `agl::sdw::ShadowMap::setSize` is the pivot —
-   `xrefs_to` it and ignore the cutscene/`GfxEnvChanger` and masked-spot-light
-   callers; the per-frame scene caller is `drawDepthShadow`.
+1. `pp(funcs(r'ShadowMap::setSize|drawDepthShadow'))` on symbol builds, or
+   `pp(strs(r'ShadowMap|DepthShadow|shadow_map_depth'))`, confirms the engine uses
+   `agl::sdw`. `agl::sdw::ShadowMap::setSize` is the pivot: `pp(callers(setSize))`
+   and ignore the cutscene/`GfxEnvChanger` and masked-spot-light callers; the
+   per-frame scene caller is `drawDepthShadow`.
 2. In `drawDepthShadow`, find the pair of `LDR Wn,[Xcfg,#imm]` feeding the
    `SCVTF/FMUL/FCVTZS/CMP/CSEL` size math just before the `setSize` call.
-3. `get_bytes` those two words. In Blitz all three builds shared the identical
+3. `print(hb(ea, 8))` those two words. In Blitz all three builds shared the identical
    encoding `09 19 58 B9 / 08 39 58 B9` at the same offset *within* the function,
    so once you have one build, locate `drawDepthShadow` in the others by symbol and
-   apply the same relative offset — then re-verify the bytes.
-4. Confirm the parameter names (`depth_shadow_tex_width` / `_height`) exist in the
-   string table to be sure you have the sun shadow and not a spot-light shadow.
+   apply the same relative offset — then re-verify the bytes. For stripped builds,
+   `fingerprints([site])` in a known build and `port_fingerprints(...)` in the new
+   one locate the site (analyzing-switch-arm64-in-ida).
+4. Confirm the parameter names exist
+   (`pp(strs(r'^depth_shadow_tex_(width|height)$'))`) to be sure you have the sun shadow and not a spot-light shadow.
 
 ## 5. Verification checklist
-1. `get_bytes` both original words; confirm they are the two config loads.
+1. `print(hb(ea, 8)); print(dis(ea, 2))` on both original words; confirm they are
+   the two config loads. `pchtxt_check(path)` shows both records decoded.
 2. Check the log applied them: `ModLoader Patch: Patching address offset ...`.
 3. Watch for a `DynamicTextureAllocator::alloc_` abort — that is the pool, not a
    bad offset (§3).

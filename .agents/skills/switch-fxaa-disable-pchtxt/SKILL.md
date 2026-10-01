@@ -19,6 +19,15 @@ by Splatoon 2 (Blitz) and Tomodachi Life (Colony).
 Deliver patches as pchtxt only. Never modify the game dump. Open IDBs **in place**
 (no copies).
 
+**IDA access.** Use the IDA MCP (`open_database`, then `execute_python`) with the
+helpers from the `using-ida-mcp`, `analyzing-switch-arm64-in-ida` and
+`writing-switch-pchtxt` skills, loaded in the first `execute_python` call after
+each open (their SKILL.md files give the lines). Back the IDB up before the first
+open in a session (`cp main.i64 main.i64.bak`): repeated open/close repacks once
+corrupted Captain Toad's IDB. Calls such as `dec`, `dis`, `hb`, `xr`, `callers`,
+`sref`, `strs`, `funcs`, `find`, `find_wide` and `pchtxt_check` below are those
+helpers.
+
 Related: `switch-resolution-pchtxt`, `switch-lod-bias-pchtxt`,
 `switch-shadow-resolution-pchtxt` — same engine family, same IDB/pchtxt conventions.
 
@@ -36,8 +45,8 @@ Related: `switch-resolution-pchtxt`, `switch-lod-bias-pchtxt`,
 ```
 A **blank** line ends an `@enabled` block (comment lines do not). CRLF line
 endings. Bytes are the little-endian encoding of each 32-bit ARM64 instruction.
-`RVA = IDB_addr - imagebase` — **Blitz and Colony IDBs load at `0x7100000000`**
-even when the health probe reports `imagebase 0x0`. Ryujinx matches on `@nsobid`
+`RVA = rva(ea)`; `info()` prints the real base (**Blitz and Colony IDBs load at
+`0x7100000000`** even when the database records imagebase 0). Ryujinx matches on `@nsobid`
 only, so one pchtxt per build can sit side by side in a single mod folder.
 
 ## 1. The mechanism
@@ -95,14 +104,15 @@ config-param strings and the shader sampler names survive. Work strings →
 structure → function; **do not** lead with byte signatures (jump table vs. compare
 chain and split immediate offsets defeat them).
 
-1. **`"aglfila"`** (or `"filter_aa"`) → data-xref → the **FilterAA constructor**.
+1. **`"aglfila"`** (or `"filter_aa"`; `pp(sref(r'^(aglfila|filter_aa)$'))`) →
+   data-xref → the **FilterAA constructor**.
    It stores the vtable at `this+0` and writes each param's **default value**,
    which hands you the field offsets: `antialias_type` = an `int` default `0`,
    `enable` = a `bool` default `1`, spaced a fixed stride apart. Note both.
 2. `draw` is not in the vtable, so find it by a **unique string in a helper it
    calls**: **`"temp_target"`** (the FXAA function also refs **`"luma"`**) →
-   data-xref → the **FXAA sub-function** → `xrefs_to` (code) that sub-function → its
-   lone caller is `draw`. Note: on Colony, `draw`/FXAA live in a **different text
+   data-xref (`pp(sref(r'^temp_target$'))`) → the **FXAA sub-function** →
+   `callers(fxaa)` → its lone caller is `draw`. Note: on Colony, `draw`/FXAA live in a **different text
    region** than the constructor (ctor `0x71005xxxx`, draw `0x71021Axxxx`) — do not
    assume proximity or trust a region-scoped search to be exhaustive.
 3. **Cross-check the symbol-bearing Splatoon 2 QA build** (`…/Blitz/1.1.0 QA B2/`)
@@ -111,7 +121,7 @@ chain and split immediate offsets defeat them).
    named `draw` there to confirm the case order (0=FXAA,1=ReduceAA,2=SMAA) and the
    pass-through target, then map onto the stripped build by structure + the field
    offsets from step 1.
-4. `decompile` the candidate and confirm it reads `enable`/`antialias_type` at the
+4. `print(dec(f, addrs=True))` the candidate and confirm it reads `enable`/`antialias_type` at the
    offsets you predicted and dispatches to the FXAA helper in case 0.
 
 ## 4. Known sites (this repo)
@@ -121,7 +131,7 @@ Testfire — same 9-arg `draw` of size ~0x250) turn the `CBNZ` guarding the FXAA
 fall-through into a `B` to the pass-through (disp `+0x30` → `0C000014`; the CBNZ's
 `Rt` sets byte0, so W8=`88…`, W9=`89…`). The **jump-table** retail builds (5.5.2,
 Colony 1.0.4) overwrite the FXAA case's first instr `MOV X0,X21` (`E0 03 15 AA`)
-with a `B` to the pass-through. All original bytes were `get_bytes`-verified.
+with a `B` to the pass-through. All original bytes were verified with `hb`.
 
 | Build (title) | `@nsobid` | draw / fields | RVA | orig → patch |
 |---|---|---|---|---|
@@ -133,14 +143,15 @@ with a `B` to the pass-through. All original bytes were `get_bytes`-verified.
 | **Tomodachi 1.0.4** (010051F0…) | `B39FEF373FB12154385D012AAB3BC99EF2944470` | `sub_71021A3CD0`; ctor `sub_710052CD98`; type@`0x748`, enable@`0x768`, scale@`0x9A0`; FXAA `sub_71021A3EB8` | `021A3E70` | `E00315AA` → `DCFFFF17` |
 
 Dev/proto/QA/Testfire Blitz builds keep the `agl::pfx::FilterAA::draw` symbol — use
-`list_funcs *FilterAA*draw*` (pick the 9-arg `…SD_bSD_` overload) instead of the
-string hunt. Field offsets shift ~+16 bytes between Blitz 5.5.2 and Colony because
+`pp(funcs(r'FilterAA::draw'))` instead of the string hunt, and pick the overload
+whose demangled arguments end in `bool, agl::TextureSampler const*` (the 9-arg
+`…SD_bSD_` one, size ~0x250). Field offsets shift ~+16 bytes between Blitz 5.5.2 and Colony because
 Colony's base class is larger; always re-read them from the constructor, never reuse
 a number.
 
 ## 5. Verification checklist
-1. `get_bytes` the original 4 bytes at the site; confirm it is the FXAA case entry
-   (or the QA `CBNZ`) and not a neighbouring `MOV`/branch.
+1. `print(hb(ea, 4)); print(dis(ea, 3, back=2))` at the site; confirm it is the
+   FXAA case entry (or the QA `CBNZ`) and not a neighbouring `MOV`/branch.
 2. Confirm the `B` target is the function's pass-through block
    (`ImageFilter2D::drawTexture` copy), **not** the `default` case (no copy) and not
    the FXAA helper.
@@ -150,10 +161,11 @@ a number.
    Wrong id ⇒ patch silently never applies; the Ryujinx log tell is
    `ModLoader ApplyProgramPatches: Matching IPSwitch patch … bid=` then
    `ModLoader Patch: Patching address offset …`.
-5. Re-read the file: contiguous `@enabled` block, CRLF, RVA offset.
+5. Re-read the file: contiguous `@enabled` block, CRLF, RVA offset. Run
+   `pchtxt_check(path)`: the `now` side must show the `B` to the pass-through.
 6. **Confirm the feature exists before promising a patch.** Not every engine ships
    FilterAA — e.g. Rhythm Heaven Groove ("Aloha") has no FXAA at all. Search the
-   string table for `FXAA_TYPE` / `antialias_type` / `aglfila` first.
+   string table first: `pp(strs(r'FXAA_TYPE|antialias_type|aglfila'))`.
 
 ## 6. Layout
 

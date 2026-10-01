@@ -17,6 +17,15 @@ higher-resolution mip level than the distance-based default — the classic
 Deliver patches as pchtxt only. Never modify the game dump. Open IDBs **in place**
 (no copies).
 
+**IDA access.** Use the IDA MCP (`open_database`, then `execute_python`) with the
+helpers from the `using-ida-mcp`, `analyzing-switch-arm64-in-ida` and
+`writing-switch-pchtxt` skills, loaded in the first `execute_python` call after
+each open (their SKILL.md files give the lines). Back the IDB up before the first
+open in a session (`cp main.i64 main.i64.bak`): repeated open/close repacks once
+corrupted Captain Toad's IDB. Calls such as `dec`, `dis`, `hb`, `xr`, `callers`,
+`sref`, `strs`, `funcs`, `find`, `find_wide` and `pchtxt_check` below are those
+helpers.
+
 Related: `switch-resolution-pchtxt` (render resolution — often shipped alongside
 this as a separate mod folder) and `switch-shadow-resolution-pchtxt`.
 
@@ -43,8 +52,8 @@ this as a separate mod folder) and `switch-shadow-resolution-pchtxt`.
 - **Offset base.** Ryujinx adds `offset_shift`, then `MemPatch` subtracts the NSO
   `protectedOffset = 0x100`. With `@flag offset_shift 0x100` the **pchtxt offset
   equals the file RVA**. Write RVAs directly.
-- **RVA from an IDB address**: `RVA = IDB_addr - imagebase` (Blitz IDBs load at
-  `0x7100000000` even when the health probe reports `imagebase 0x0`).
+- **RVA from an IDB address**: `rva(ea)`; `info()` prints the real base (Blitz
+  IDBs load at `0x7100000000` even when the database records imagebase 0).
 - Filename is arbitrary; Ryujinx matches on `@nsobid` only, so files for every
   build can sit side by side in one mod folder.
 - **Line endings: CRLF.**
@@ -73,14 +82,15 @@ sampler's data, it applies to every sampler the title creates.
 The setter calls go through GOT pointers with a stable idiom
 `LDR X8,[X8]; MOV X0,SP; BLR X8` = `08 01 40 F9 E0 03 00 91 00 01 3F D6`. The LOD
 bias load sits between the `setLodClamp` (`LDP S0,S1,[Xn,#8]`) and `setLodBias`
-calls. Search this masked fingerprint (register/PC-relative bytes wildcarded):
+calls. Search this masked fingerprint (register/PC-relative bytes wildcarded)
+with `find("...")`; it took 0.24 s on Splatoon 2 5.5.2:
 
 ```
 ?? ?? 41 2D ?? ?? ?? ?? 08 01 40 F9 E0 03 00 91 00 01 3F D6 ?? ?? ?? ?? ?? ?? 40 BD ?? ?? ?? ?? 08 01 40 F9 E0 03 00 91 00 01 3F D6
 ```
 
 It is unique per build. The `LDR S0,[Xn,#0x10]` to patch is at **match + 0x18**.
-Always `disasm` that address and confirm the following call resolves to
+Always `print(dis(match + 0x18, 5))` and confirm the following call resolves to
 `SetLodBias` before trusting it; confirm by symbol too when one is present
 (`nn::gfx::detail::SamplerImpl<...>::Initialize`).
 
@@ -101,14 +111,15 @@ identical** — re-derive it per build rather than reusing a number.
 increases aliasing and texture-cache pressure fast; prefer `-1.0` unless asked.
 
 ## 4. Verification checklist
-1. `get_bytes` the original 4 bytes; confirm it is `LDR S0,[Xn,#0x10]` and not a
-   neighbouring float load.
-2. `disasm` forward a few instructions and confirm the `SetLodBias` call.
+1. `print(hb(ea, 4))` on the original bytes; confirm it is `LDR S0,[Xn,#0x10]`
+   and not a neighbouring float load.
+2. `print(dis(ea, 5))` and confirm the `SetLodBias` call.
 3. Confirm `@nsobid` against the NSO ModuleId (file offset 0x40, trailing zeros
    trimmed). A wrong build id means the patch silently never applies — in a Ryujinx
    run log the tell is the `ModLoader ApplyProgramPatches: Matching IPSwitch patch
    ... bid=` line, followed by `ModLoader Patch: Patching address offset ...`.
-4. Re-read the written file: contiguous `@enabled` block, CRLF, RVA offsets.
+4. Re-read the written file: contiguous `@enabled` block, CRLF, RVA offsets, then
+   `pchtxt_check(path)` to decode the record against the IDB.
 
 ## 5. Layout
 
