@@ -60,8 +60,8 @@
 // layer applies the key at the whole frame with no blending, so menus and
 // pop-ups still animate at 30 Hz. The keyframe sampler now blends the current
 // key with the next one by the fractional frame when the next key is exactly
-// one frame later and the animation is playing, which leaves holds and jumps
-// as authored. The position, matrix and colour channels take both key values
+// one frame later and the clock's whole frame is the current key's frame,
+// which leaves holds and jumps as authored. The position, matrix and colour channels take both key values
 // and blend them, and the pattern channel keeps the current key. The setup
 // code fits in the sampler's parent combine block, which is rewritten more
 // compactly, and in the room the blending channels leave free.
@@ -462,22 +462,22 @@
 0082FDFC 896A4079   // LDRH W9, [X20, #0x34]
 0082FE00 3E01271E   // FMOV S30, W9
 0082FE04 1FE4002F   // MOVI D31, #0000000000000000
-0082FE08 0A034039   // LDRB W10, [X24]
-0082FE0C 6A180036   // TBZ W10, #0x0, 0x830118
-0082FE10 CA0240B9   // LDR W10, [X22]
-0082FE14 2B050011   // ADD W11, W9, #0x1
-0082FE18 7F010A6B   // CMP W11, W10
-0082FE1C E2170054   // B.HS 0x830118
-0082FE20 AF0A098B   // ADD X15, X21, X9, LSL #2
-0082FE24 ED014079   // LDRH W13, [X15]
-0082FE28 EE0540B9   // LDR W14, [X15, #0x4]
-0082FE2C B0050011   // ADD W16, W13, #0x1
-0082FE30 CE410012   // AND W14, W14, #0x1FFFF
-0082FE34 DF01106B   // CMP W14, W16
-0082FE38 01170054   // B.NE 0x830118
-0082FE3C 705A41F9   // LDR X16, [X19, #0x2B0]
-0082FE40 11074079   // LDRH W17, [X24, #0x2]
-0082FE44 100E118B   // ADD X16, X16, X17, LSL #3
+0082FE08 CA0240B9   // LDR W10, [X22]
+0082FE0C 2B050011   // ADD W11, W9, #0x1
+0082FE10 7F010A6B   // CMP W11, W10
+0082FE14 42180054   // B.HS 0x83011C
+0082FE18 AF0A098B   // ADD X15, X21, X9, LSL #2
+0082FE1C ED014079   // LDRH W13, [X15]
+0082FE20 EE0540B9   // LDR W14, [X15, #0x4]
+0082FE24 B0050011   // ADD W16, W13, #0x1
+0082FE28 CE410012   // AND W14, W14, #0x1FFFF
+0082FE2C DF01106B   // CMP W14, W16
+0082FE30 61170054   // B.NE 0x83011C
+0082FE34 705A41F9   // LDR X16, [X19, #0x2B0]
+0082FE38 11074079   // LDRH W17, [X24, #0x2]
+0082FE3C 100E118B   // ADD X16, X16, X17, LSL #3
+0082FE40 000A402D   // LDP S0, S2, [X16]
+0082FE44 A101231E   // UCVTF S1, W13
 0082FE48 90000014   // B 0x830088
 // Key value dispatch, 8-bit index table: current and next key values
 0082FF40 C903261E   // FMOV W9, S30
@@ -554,11 +554,11 @@
 0083007C 0090814F   // FMUL V0.4S, V0.4S, V1.S[0]
 00830080 0080813C   // STUR Q0, [X0, #0x18]
 00830084 C0035FD6   // RET
-00830088 000240BD   // LDR S0, [X16]
-0083008C A101231E   // UCVTF S1, W13
-00830090 0038211E   // FSUB S0, S0, S1
-00830094 0820201E   // FCMP S0, #0.0
-00830098 0D040054   // B.LE 0x830118
+00830088 42D8215E   // SCVTF S2, S2
+0083008C 4020211E   // FCMP S2, S1
+00830090 61040054   // B.NE 0x83011C
+00830094 0038211E   // FSUB S0, S0, S1
+00830098 0820201E   // FCMP S0, #0.0
 0083009C 1A000014   // B 0x830104
 // Colour multiply and add channel: blend bytes; blend setup ends
 008300A0 405861FC   // LDR D0, [X2, W1, UXTW #3]
@@ -586,12 +586,13 @@
 008300F8 08C00091   // ADD X8, X0, #0x30
 008300FC 0381004D   // ST1 { V3.S }[2], [X8]
 00830100 C0035FD6   // RET
-00830104 01102E1E   // FMOV S1, #1.00000000
-00830108 0020211E   // FCMP S0, S1
-0083010C 6A000054   // B.GE 0x830118
-00830110 1F40201E   // FMOV S31, S0
-00830114 7E01271E   // FMOV S30, W11
-00830118 C0035FD6   // RET
+00830104 CD000054   // B.LE 0x83011C
+00830108 01102E1E   // FMOV S1, #1.00000000
+0083010C 0020211E   // FCMP S0, S1
+00830110 6A000054   // B.GE 0x83011C
+00830114 1F40201E   // FMOV S31, S0
+00830118 7E01271E   // FMOV S30, W11
+0083011C C0035FD6   // RET
 // Pattern channel: current key
 0083012C 01DC0039   // STRB W1, [X0, #0x37]
 @stop
