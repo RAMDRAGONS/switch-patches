@@ -1,0 +1,37 @@
+@nsobid-867B345248124EF3D70E3202E221E978964C592F
+
+# Xenoblade Chronicles 2 3.0.1 - Fix Loading Hang
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Fixes a stock hang where a loading screen never finishes, most often right
+// after skipping a cutscene, and more often the higher the frame rate. This
+// patches the nnSdk module, not the game's main module, so it applies with or
+// without the frame rate mods.
+//
+// The game reads its archives through four file threads that share a pool of
+// two IPC sessions to the filesystem service. A thread that finds the pool
+// empty sleeps on a condition variable until a session is returned. Returning
+// a session wakes one sleeper, but only when the pool was empty at that
+// moment. With two threads asleep, two sessions returned back to back wake
+// only one of them: the second return sees the first session still in the
+// pool and wakes nobody. The other thread sleeps on with a free session in the
+// pool, and the load waits on its read forever, since no other thread issues
+// filesystem calls to wake it. Loading bursts after a cutscene skip put
+// several threads in the queue at once, and a higher frame rate issues
+// streaming reads more often, so the window opens more often.
+//
+// Every returned session now wakes one sleeper. A woken thread rechecks the
+// pool under the lock and goes back to sleep if another thread took the
+// session first, so the extra wakeups are harmless.
+@enabled
+// HipcSimpleClientSessionManagerBase::Impl::Deallocate: always signal
+000525EC 1F2003D5   // NOP = wake a waiter on every return (was CBNZ X8, skip the signal when the pool was not empty)
+// HipcSimpleClientSessionManagerBase::Impl::SetSessionCountImpl: same, per added session
+0005267C 1F2003D5   // NOP = wake a waiter for every added session (was CBNZ X8, skip the signal when the pool was not empty)
+@stop
+
+// Byte-verified against the nnSdk image in memory.
+//
+// https://github.com/RAMDRAGONS/switch-patches
