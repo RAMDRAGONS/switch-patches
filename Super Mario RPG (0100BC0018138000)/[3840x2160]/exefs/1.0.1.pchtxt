@@ -1,0 +1,65 @@
+@nsobid-97F9664CFB2721546954CDEB3B303A4C
+
+# Super Mario RPG 1.0.1 - 3840x2160 resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Renders and scans out at 3840x2160 in both docked and handheld mode.
+//
+// Super Mario RPG is a Unity title (URP) that renders at 1920x1080 docked
+// and 1280x720 handheld. The Unity NX player owns the resolution, and five
+// separate places have to move together:
+//
+//   1. the resolution picker, which chooses 1280x720 or 1920x1080 from the
+//      operation and performance mode at boot and on every mode change,
+//   2. the min(w,1920)/min(h,1080) ceiling in ScreenManager's
+//      RequestResolution, which would clamp (1) back down,
+//   3. the backbuffer RenderSurface, allocated at a fixed 1920x1080 that the
+//      player renders a sub-rect of, so without it the frame stays 1080p,
+//   4. the NVN window textures and depth buffer, also a fixed 1920x1080,
+//   5. two game-side overlays (DrawAfterUI, DrawCaptureImage) that render
+//      a 3D layer through their own camera into a fixed 1280x720 texture
+//      and show it on the UI canvas; raised so those layers match the scene.
+//
+// Both halves of every picker pair are set to the target, so the
+// resolution no longer depends on dock state. UI code positions elements by
+// dividing by Screen.width/height into a fixed canvas space, so the HUD
+// scales with the new size. The back-buffer memory pool is sized from the
+// texture storage sizes at runtime and grows on its own.
+
+@enabled
+// 1. Resolution picker (operation/performance mode).
+006B7218 17E08152   // MOVZ W23,#3840 (was 1280, default + handheld)
+006B721C 160E8152   // MOVZ W22,#2160 (was 720)
+006B72B8 08E08152   // MOVZ W8,#3840  (was 1920, mode 3 docked+boost)
+006B72C0 090E8152   // MOVZ W9,#2160  (was 1080)
+006B72D0 08E08152   // MOVZ W8,#3840  (was 1920, docked or boost)
+006B72D8 080E8152   // MOVZ W8,#2160  (was 1080)
+// 2. RequestResolution ceiling. The compares move with the constants so the
+//    clamp is still a min() for any requested size.
+0062F2C8 BF023C71   // CMP  W21,#3840 (was 1920)
+0062F2CC 08E08152   // MOVZ W8,#3840
+0062F2D4 9FC22171   // CMP  W20,#2160 (was 1080)
+0062F2DC 080E8152   // MOVZ W8,#2160
+// 3. Backbuffer RenderSurface.
+006B60BC 030E8152   // MOVZ W3,#2160 (height)
+006B60C8 02E08152   // MOVZ W2,#3840 (width)
+// 4. NVN back-buffer color and depth textures, and the window textures.
+006CAF18 170E8152   // MOVZ W23,#2160 (height, color + depth)
+006CAF20 01E08152   // MOVZ W1,#3840  (color width)
+006CAFB8 01E08152   // MOVZ W1,#3840  (depth width)
+006CB198 01E08152   // MOVZ W1,#3840  (window texture width)
+006CB19C 020E8152   // MOVZ W2,#2160  (window texture height)
+// 5. DrawAfterUI and DrawCaptureImage overlay render textures.
+01D5E754 01E08152   // MOVZ W1,#3840 (DrawAfterUI, was 1280)
+01D5E758 020E8152   // MOVZ W2,#2160 (was 720)
+01D5F22C 01E08152   // MOVZ W1,#3840 (DrawCaptureImage, was 1280)
+01D5F230 020E8152   // MOVZ W2,#2160 (was 720)
+@stop
+
+// Reverse-engineered against Super Mario RPG 1.0.1 (Unity 2021.3.15f1, URP,
+// IL2CPP). Names come from the game's own IL2CPP metadata; every offset was
+// byte-verified against the IDB.
+//
+// https://github.com/RAMDRAGONS/switch-patches

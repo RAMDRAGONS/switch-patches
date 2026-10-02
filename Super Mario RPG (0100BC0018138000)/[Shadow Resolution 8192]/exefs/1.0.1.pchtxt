@@ -1,0 +1,42 @@
+@nsobid-97F9664CFB2721546954CDEB3B303A4C
+
+# Super Mario RPG 1.0.1 - 8192x8192 shadow resolution
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces the sun (main light) shadow map to 8192x8192 and the character
+// shadow decal atlas to 4096x4096.
+//
+// The sun shadow size comes from the active URP pipeline asset, which the
+// game swaps per scene through its quality levels: 2048 in most scenes
+// (UniversalRP-sr2k_sd72_cc4), 1024 in some (UniversalRP-sr1k_sd72_cc4),
+// split into up to 4 cascades. URP copies the asset value into the per-frame
+// shadow data in UniversalRenderPipeline.InitializeShadowData; overriding
+// those two reads applies the size in every scene and quality level, and
+// MainLightShadowCasterPass uses it without any further clamp.
+//
+// Characters cast a separate projected "fake" shadow (UTJ FakeShadowPass),
+// drawn into one shared decal atlas for up to 25 characters. Its size,
+// decalMapSize, is 2048 in the renderer data and only sets the texture
+// dimensions; shadows are placed in normalized coordinates, so a larger
+// atlas sharpens them with no other change. 4096 already gives each
+// character more texels than it can show.
+//
+// Point and spot light shadows (additional lights) are left as shipped.
+
+@enabled
+// UniversalRenderPipeline.InitializeShadowData:
+// mainLightShadowmapWidth / Height (was LDR W9,[X20,#0x7C], asset value)
+019B95C4 09008452   // MOVZ W9,#8192
+019B95CC 09008452   // MOVZ W9,#8192
+// FakeShadowPassFeature.CharacterShadowPass.OnCameraSetup:
+// decal atlas size (was LDR W1,[X0,#0xDC], decalMapSize 2048)
+01EC7E88 01008252   // MOVZ W1,#4096
+@stop
+
+// Reverse-engineered against Super Mario RPG 1.0.1 (Unity 2021.3.15f1, URP,
+// IL2CPP). Names come from the game's own IL2CPP metadata; every offset was
+// byte-verified against the IDB.
+//
+// https://github.com/RAMDRAGONS/switch-patches
