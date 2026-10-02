@@ -51,6 +51,17 @@
 // each update; at 60 FPS they turn 1 - sqrt(0.75) per update, which gives the
 // same turn per 1/30 s.
 //
+// Characters turn by easing toward the new facing, 0.3 (or 0.5) of the
+// remaining angle per 30 Hz tick. The turn update runs every frame but its
+// tick flag is only set on the update where the step accumulator reaches 2,
+// so at 60 FPS turns moved every other frame. The flag now carries the
+// elapsed time in ticks and each turn moves 1 - (1 - k)^ticks of the way,
+// which matches the 30 FPS turn speed at any frame rate.
+//
+// Moving floors add their turn speed to their angle once per script update,
+// so a turning floor would spin twice as fast. The speed is scaled by
+// min(step, 2) / 2. No shipped map sets up a turning floor.
+//
 // The Paper Game runners run native AI that counts updates rather than time
 // (gravity, fan push and animation blends per update), so it runs as a fixed
 // 30 Hz tick: the game step accumulates, and each time it reaches 2 the
@@ -61,6 +72,15 @@
 // blended position, so resets and scripted moves are left alone, and jumps of
 // more than 20 units snap instead of blending. The blend state lives in the
 // unused tail of the last .bss page.
+//
+// Guard, Superguard, timed press, Stylish and button prompt windows count
+// 60 Hz frames and need no change. At 30 FPS every window rounded up to whole
+// updates, so odd windows are a frame shorter at 60 FPS, as on GameCube.
+//
+// Shell Shield slows its swing while the stick is held by a per-update amount
+// truncated to whole units: -2 per 60 Hz update at full tilt but -5 per 30 Hz
+// update, so the shell swung twice as fast. The 30 Hz amount is now truncated
+// and split over two updates.
 //
 // The added code sits in three dead static initialisers with no code or data
 // references, and in repeated static-init blocks of sub_71004780D0 that never
@@ -386,6 +406,101 @@
 0085D220 9F79F097   // BL 0x47B89C = jump mover with scaled velocity and gravity (was BL 0xA3061C)
 00862F44 5662F097   // BL 0x47B89C = jump mover with scaled velocity and gravity (was BL 0xA3061C)
 00A90780 6FACE797   // BL 0x47B93C = billboard turn fraction per update (was FMOV S10, #0.25)
+// Shell Shield swing speed while the stick is held
+00473098 92D51194   // BL 0x8E86E0 = stick slowdown (was FCVTZS W8, S0)
+008E86E0 D00240F9   // LDR X16, [X22]
+008E86E4 10124091   // ADD X16, X16, #0x4, LSL #12
+008E86E8 107A4ABD   // LDR S16, [X16, #0xA78]
+008E86EC 11102F1E   // FMOV S17, #1.50000000
+008E86F0 0022311E   // FCMP S16, S17
+008E86F4 4A010054   // B.GE 0x8E871C
+008E86F8 1128201E   // FADD S17, S0, S0
+008E86FC 2802381E   // FCVTZS W8, S17
+008E8700 D0E10090   // ADRP X16, 0x2520000
+008E8704 101248B9   // LDR W16, [X16, #0x810]
+008E8708 117D0113   // ASR W17, W8, #1
+008E870C 0801114B   // SUB W8, W8, W17
+008E8710 1F020072   // TST W16, #0x1
+008E8714 2802881A   // CSEL W8, W17, W8, EQ
+008E8718 C0035FD6   // RET
+008E871C 0800381E   // FCVTZS W8, S0
+008E8720 C0035FD6   // RET
+// Character paper turns step every frame
+0050BB18 09730F94   // BL 0x8E873C = turn fraction for the elapsed ticks (was LDR S2, [X19, #0x70])
+0050BCCC 9C720F94   // BL 0x8E873C = turn fraction for the elapsed ticks (was LDR S2, [X19, #0x70])
+0050C6B4 34700F94   // BL 0x8E8784 = turn fraction for the elapsed ticks (was LDR S3, [X19, #0x70])
+0050CC54 DE6E0F94   // BL 0x8E87CC = turn fraction for the elapsed ticks (was LDR S1, [X19, #0x70])
+0050CDA0 616E0F94   // BL 0x8E8724 = turn tick carries elapsed 30 Hz ticks (was FCSEL S0, S13, S14, NE)
+008E8724 9C000034   // CBZ W28, 0x8E8734
+008E8728 00182F1E   // FDIV S0, S0, S15
+008E872C 7F6E00B9   // STR WZR, [X19, #0x6C]
+008E8730 C0035FD6   // RET
+008E8734 C041201E   // FMOV S0, S14
+008E8738 C0035FD6   // RET
+008E873C 707240BD   // LDR S16, [X19, #0x70]
+008E8740 102A301E   // FADD S16, S16, S16
+008E8744 1002241E   // FCVTAS W16, S16
+008E8748 51EB8552   // MOV W17, #0x2F5A
+008E874C D1EAA772   // MOVK W17, #0x3F56, LSL #16
+008E8750 3102271E   // FMOV S17, W17
+008E8754 02102E1E   // FMOV S2, #1.00000000
+008E8758 10060071   // SUBS W16, W16, #0x1
+008E875C 6B000054   // B.LT 0x8E8768
+008E8760 4208311E   // FMUL S2, S2, S17
+008E8764 FDFFFF17   // B 0x8E8758
+008E8768 10102E1E   // FMOV S16, #1.00000000
+008E876C 023A221E   // FSUB S2, S16, S2
+008E8770 B1AA8A52   // MOV W17, #0x5555
+008E8774 B10AA872   // MOVK W17, #0x4055, LSL #16
+008E8778 3102271E   // FMOV S17, W17
+008E877C 4208311E   // FMUL S2, S2, S17
+008E8780 C0035FD6   // RET
+008E8784 707240BD   // LDR S16, [X19, #0x70]
+008E8788 102A301E   // FADD S16, S16, S16
+008E878C 1002241E   // FCVTAS W16, S16
+008E8790 51EB8552   // MOV W17, #0x2F5A
+008E8794 D1EAA772   // MOVK W17, #0x3F56, LSL #16
+008E8798 3102271E   // FMOV S17, W17
+008E879C 03102E1E   // FMOV S3, #1.00000000
+008E87A0 10060071   // SUBS W16, W16, #0x1
+008E87A4 6B000054   // B.LT 0x8E87B0
+008E87A8 6308311E   // FMUL S3, S3, S17
+008E87AC FDFFFF17   // B 0x8E87A0
+008E87B0 10102E1E   // FMOV S16, #1.00000000
+008E87B4 033A231E   // FSUB S3, S16, S3
+008E87B8 B1AA8A52   // MOV W17, #0x5555
+008E87BC B10AA872   // MOVK W17, #0x4055, LSL #16
+008E87C0 3102271E   // FMOV S17, W17
+008E87C4 6308311E   // FMUL S3, S3, S17
+008E87C8 C0035FD6   // RET
+008E87CC 707240BD   // LDR S16, [X19, #0x70]
+008E87D0 102A301E   // FADD S16, S16, S16
+008E87D4 1002241E   // FCVTAS W16, S16
+008E87D8 719E8052   // MOV W17, #0x4F3
+008E87DC B1E6A772   // MOVK W17, #0x3F35, LSL #16
+008E87E0 3102271E   // FMOV S17, W17
+008E87E4 01102E1E   // FMOV S1, #1.00000000
+008E87E8 10060071   // SUBS W16, W16, #0x1
+008E87EC 6B000054   // B.LT 0x8E87F8
+008E87F0 2108311E   // FMUL S1, S1, S17
+008E87F4 FDFFFF17   // B 0x8E87E8
+008E87F8 10102E1E   // FMOV S16, #1.00000000
+008E87FC 013A211E   // FSUB S1, S16, S1
+008E8800 2128211E   // FADD S1, S1, S1
+008E8804 C0035FD6   // RET
+// Moving floor turn speed
+0069EDC8 90260994   // BL 0x8E8808 = turn speed x min(step, 2) / 2 (was FADD S0, S0, S1)
+008E8808 30310090   // ADRP X16, 0xF0C000
+008E880C 107A40F9   // LDR X16, [X16, #0xF0]
+008E8810 100240F9   // LDR X16, [X16]
+008E8814 10124091   // ADD X16, X16, #0x4, LSL #12
+008E8818 107A4ABD   // LDR S16, [X16, #0xA78]
+008E881C 1110201E   // FMOV S17, #2.00000000
+008E8820 105A311E   // FMIN S16, S16, S17
+008E8824 11102C1E   // FMOV S17, #0.50000000
+008E8828 100A311E   // FMUL S16, S16, S17
+008E882C 0004101F   // FMADD S0, S0, S16, S1
+008E8830 C0035FD6   // RET
 @stop
 
 // Swap interval site from the 60FPS mod by Fl4sh
