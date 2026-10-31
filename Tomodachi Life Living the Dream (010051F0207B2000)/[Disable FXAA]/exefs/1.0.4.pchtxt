@@ -7,15 +7,19 @@
 
 // Disables the FXAA post-process anti-aliasing pass in agl::pfx::FilterAA::draw.
 // The filter dispatches on its antialias_type field (this+0x748): 0 = FXAA,
-// 1 = ReduceAA, 2 = SMAA. This redirects only the FXAA case (type 0) to the plain
-// pass-through copy, so the frame is presented unfiltered instead of FXAA-blurred.
-// ReduceAA/SMAA are left intact if ever selected.
+// 1 = ReduceAA, 2 = SMAA. ReduceAA/SMAA are left intact if ever selected.
 //
-// Patch: the first instruction of the FXAA jump-table case is replaced with a
-// branch back to the filter's disabled/pass-through path.
+// This game runs FXAA in place: the pass's source texture is the color buffer
+// it renders to. Redirecting FXAA to the plain pass-through copy therefore
+// copies the buffer onto itself, which emulators can show as flickering tiles
+// (seen in Ryujinx on RDNA4). Since the color buffer already holds the
+// unfiltered frame, the FXAA case jumps to the jump table's default case and
+// draws nothing. The wrapper (sub_71021A3974) also skips refreshing the
+// temporal history buffer for FXAA, as it does for SMAA, since nothing reads it.
 
 @enabled
-021A3E70 DCFFFF17   // B (pass-through)   (was MOV X0, X21 = FXAA case entry)
+021A39F4 1F791E72   // TST W8, #~2          (was CMP W8, #2: no history buffer for types 0 and 2)
+021A3E70 F2FFFF17   // B def_71021A3DA0     (was MOV X0, X21 = FXAA case entry)
 @stop
 
 // Same agl/gsys FilterAA as Splatoon 2; the constructor and draw dispatch were
