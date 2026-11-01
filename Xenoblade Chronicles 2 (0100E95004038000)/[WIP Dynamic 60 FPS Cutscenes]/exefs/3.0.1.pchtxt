@@ -5,51 +5,97 @@
 @flag print_values
 @flag offset_shift 0x100
 
-// Runs gameplay and menus at up to 60 FPS with a step that follows the real
-// frame time, and real-time cutscenes at a fixed 60 FPS step.
+// Runs gameplay, menus and real-time cutscenes at up to 60 FPS with a step
+// that follows the real frame time.
 //
 // The game paces itself with a CPU wait of (1/60 s) x swap interval, and its
 // clock hands every subsystem the step stored in the framework object. Once
 // per presented frame, right before the present call, the patch sets the swap
 // interval to 1 and the step to the measured frame time, clamped to 1/60 to
-// 1/30 s so the game keeps real-time speed down to 30 FPS. While the event
-// scene state marks a playing real-time cutscene, the step is held at 1/60
-// instead, because the cutscene changes below count on half a frame per
-// update. The layer (UI) manager gets the same step, and the wind simulation
+// 1/30 s so the game keeps real-time speed down to 30 FPS. The step x 30 also
+// drives a 30 Hz tick: an accumulator gains the step x 30 each frame, and the
+// tick fires on the update that carries it over a whole frame, then drops
+// that frame. The layer (UI) manager gets the step, and the wind simulation
 // reads it in place of its own 1/30 constant. The clock's scaled step keeps
 // its speed factor, which pauses and slows the game, and a speed change keeps
 // the current step instead of resetting it to the config rate. The previous
-// counter value is kept in unused memory past the last .bss variable, next to
-// the step copies below.
+// counter value, the tick and its accumulator are kept in unused memory past
+// the last .bss variable, next to the step copies below.
 // Menu waits counted in updates still count updates and last longer below
 // 60 FPS.
 //
 // Events (cutscenes) run on a timeline counted in whole 30 Hz frames. In
 // sound-synced events the timeline follows the voice and BGM position
 // (seconds x 30) and holds whenever it would get more than one frame ahead,
-// so at 60 updates per second it steps one frame and holds the next, and
-// stays in time with the audio. Event components depend on those whole-frame
-// steps. Events that are not audio-locked have no hold and would play at
-// double speed, so on every other update (update counter parity) they hold
-// the timeline the way a pause does, stepping whole frames at 30 per second
-// like the audio-locked ones. Event objects also run their own 30 Hz frame
-// timers, the delays before event voices and BGM start among them; the float
-// timers now step by 0.5 and the integer ones start doubled. Events that play
-// outside the cutscene state run at the measured step, so they keep stock
-// timing only at a steady 60 FPS.
+// so above 30 updates per second it steps or holds by itself and stays in
+// time with the audio. Event components depend on those whole-frame steps.
+// Events that are not audio-locked have no hold and would play fast, so they
+// now step only on updates where the 30 Hz tick fires and hold the timeline
+// on the others, the way a pause does, stepping whole frames at 30 per second
+// like the audio-locked ones. The first step from frame 0 always goes
+// through: the title screen's event gets one update before the title pauses
+// it, and holding that update left the camera at the map's origin instead of
+// the sky. Event objects also run their own 30 Hz frame timers, the delays
+// before event voices and BGM start among them. The float timers now count
+// down by the step x 30, and the integer waits start at their frame count x
+// updates per frame (the frame count x 4096 / the fixed-point step x 30,
+// rounded). One load wait whose action fires partway down its count keeps
+// both values doubled, which is exact at 60 FPS.
 //
 // Characters would still move in those 30 Hz steps. Both character event
 // components get an even per-update step instead: a tracking loop moves them
-// about half a frame each update and closes a quarter of the remaining gap to
-// the timeline, so motion stays even whatever the step and hold pattern, and
-// jumps and seeks pass through unchanged. Their command lists then also run on
-// hold updates. A command's call counter only marks its first call, and each
+// by the step x 30 each update, plus an eighth of the gap between a filtered
+// lag and half a frame. The lag (timeline frame minus tracked time) jumps by a
+// whole frame on every timeline step, so it goes through a one-pole filter
+// (a quarter of the change per update) first, and the per-update step stays
+// within about 1% of even. Jumps and seeks pass through unchanged. The event
+// camera gets the same step: its tracks advance by the timeline delta and only
+// ran on updates where the timeline stepped, so at 60 FPS the camera moved in
+// 30 Hz steps while the characters moved every update, and the characters
+// shook back and forth against the camera. Its component now smooths the step
+// first like the character components. Event cameras are baked per frame and
+// sampled between frames, so a cut baked into the data (a jump between two
+// consecutive frames) would be drawn halfway through the jump over two or
+// three updates, which stock never shows. When the jump from the current
+// frame to the next is more than 4x both neighbouring jumps and over 0.35
+// units, the camera samples the current frame, as stock does, and switches to
+// the frame after the cut on the update where the timeline itself reaches
+// it, which is when the characters move to the next shot. The baked
+// rotation is a set of Euler angles in degrees blended per channel, and the
+// data can switch to an equivalent set (x - 180, 180 - y, z - 180) or wrap at
+// 180 between two frames. Stock only shows whole frames, but a blend across
+// either swings the camera, so the next frame's angles are first brought into
+// the current frame's form. The character command lists also run on hold
+// updates. A command's call counter only marks its first call, and each
 // pending start delay gains one on those updates so it still counts 30 Hz
 // frames. Commands that turn the step into a playback rate (action speed,
-// move and attachment animation) take the full-frame rate from an unused slot
-// in the character's step copy, so animations keep their authored speed. The
-// loop's state word sits in padding after the event manager's step block, and
-// its code in dead repeated static-init blocks.
+// move and attachment animation) take a full-frame rate from an unused slot
+// in the character's step copy: the tracked per-update step over the step x
+// 30, which is 1 at a steady pace at any frame rate and drops while the
+// timeline waits on the audio, as the stock step does. A fixed 1 there kept
+// characters moving through those waits, so they drifted ahead of the
+// cutscene. The attachment animation divides the per-update step by the step
+// x 30 the same way, so animations keep their authored speed. The
+// loop's state word sits in padding after the event manager's step block, the
+// filter state past the last .bss variable, and its code in dead repeated
+// static-init blocks.
+//
+// Character skeletal animation stores bone translation and scale as cubic
+// segments fitted through the per-frame values, exact on whole frames. Where a
+// cutscene cuts inside a segment (a bone moving several units at once), the
+// cubic swings far past both ends between those frames, and the character's
+// limbs fly through the next shot for a few updates. A segment whose jump is
+// over 4x both neighbouring segments' and over 0.35 units per frame is sampled
+// on the whole frame, as stock does.
+//
+// Effects that follow a path, such as the diving helmet lamps, sample baked
+// per-frame transform tracks that advance with their command list on timeline
+// frames only, so they moved in 30 Hz steps against characters that move every
+// update. The list stays on whole frames, since its commands start and end
+// effects and lights by frame. On the updates after the list runs, each
+// running track is sampled again with a zero step at its shown frame plus the
+// characters' smoothed steps since, which moves the effect on the characters'
+// time without advancing its clock or firing its keyed events.
 //
 // Particle effects run on a fixed-step accumulator that gains 1.0 per update
 // and simulates one effect frame each time it reaches 1.0. It now gains, tests
@@ -86,12 +132,11 @@
 //
 // Everything left on 30 Hz units converts authored frame counts to seconds
 // (x 1/30) and does not depend on the update rate. Pre-rendered movies play
-// through a separate player and are unaffected. Below 30 FPS in gameplay, or
-// below 60 FPS in cutscenes, the game slows down. The frame code and its step
-// helpers sit in dead repeated static-init blocks, whose guards are already
-// set when the code runs.
+// through a separate player and are unaffected. Below 30 FPS the game slows
+// down. The frame code and its step helpers sit in dead repeated static-init
+// blocks, whose guards are already set when the code runs.
 @enabled
-// Frame rate: up to 60 FPS, a fixed 60 FPS step in real-time cutscenes
+// Frame rate: up to 60 FPS, and a 30 Hz tick for the event timeline
 007009E4 83F9E897   // BL 0x13EFF0 = set the frame rate before each present (was MOV W8,#0x21A0)
 0013EFEC 3B000014   // B 0x13F0D8 = skip repeated static init (guard already set)
 0013EFF0 20E03BD5   // MRS X0, CNTPCT_EL0
@@ -110,33 +155,48 @@
 0013F024 2228211E   // FADD S2, S1, S1
 0013F028 0068211E   // FMAXNM S0, S0, S1
 0013F02C 0078221E   // FMINNM S0, S0, S2
-0013F030 C05400B0   // ADRP X0, 0xBD8000
-0013F034 00007D39   // LDRB W0, [X0, #0xF40]
-0013F038 1F040071   // CMP W0, #0x1
-0013F03C 200C201E   // FCSEL S0, S1, S0, EQ
-0013F040 21008052   // MOV W1, #0x1                // =1
-0013F044 A25100D0   // ADRP X2, 0xB75000
-0013F048 42003191   // ADD X2, X2, #0xC40
-0013F04C 41040029   // STP W1, W1, [X2]
-0013F050 01D0271E   // FMOV S1, #30.00000000
-0013F054 0108211E   // FMUL S1, S0, S1
-0013F058 62A500D0   // ADRP X2, 0x15ED000
-0013F05C 42001491   // ADD X2, X2, #0x500
-0013F060 21D0181E   // FCVTZS W1, S1, #0xC
-0013F064 410000BD   // STR S1, [X2]
-0013F068 410400B9   // STR W1, [X2, #0x4]
-0013F06C 805200B0   // ADRP X0, 0xB90000
-0013F070 006840F9   // LDR X0, [X0, #0xD0]
-0013F074 800000B4   // CBZ X0, 0x13F084
-0013F078 018040BD   // LDR S1, [X0, #0x80]
-0013F07C 0108211E   // FMUL S1, S0, S1
-0013F080 00040F2D   // STP S0, S1, [X0, #0x78]
-0013F084 20570090   // ADRP X0, 0xC23000
-0013F088 006441F9   // LDR X0, [X0, #0x2C8]
-0013F08C 400000B4   // CBZ X0, 0x13F094
-0013F090 008000BD   // STR S0, [X0, #0x80]
-0013F094 08348452   // MOV W8, #0x21A0             // =8608
-0013F098 C0035FD6   // RET
+0013F030 21008052   // MOV W1, #0x1                // =1
+0013F034 A25100D0   // ADRP X2, 0xB75000
+0013F038 42003191   // ADD X2, X2, #0xC40
+0013F03C 41040029   // STP W1, W1, [X2]
+0013F040 01D0271E   // FMOV S1, #30.00000000
+0013F044 0108211E   // FMUL S1, S0, S1
+0013F048 62A500D0   // ADRP X2, 0x15ED000
+0013F04C 42001491   // ADD X2, X2, #0x500
+0013F050 21D0181E   // FCVTZS W1, S1, #0xC
+0013F054 410000BD   // STR S1, [X2]
+0013F058 410400B9   // STR W1, [X2, #0x4]
+0013F05C 431040BD   // LDR S3, [X2, #0x10]
+0013F060 6328211E   // FADD S3, S3, S1
+0013F064 04102E1E   // FMOV S4, #1.00000000
+0013F068 6020241E   // FCMP S3, S4
+0013F06C E1B79F1A   // CSET W1, GE
+0013F070 6438241E   // FSUB S4, S3, S4
+0013F074 83AC231E   // FCSEL S3, S4, S3, GE
+0013F078 431000BD   // STR S3, [X2, #0x10]
+0013F07C 410C00B9   // STR W1, [X2, #0xC]
+0013F080 805200B0   // ADRP X0, 0xB90000
+0013F084 006840F9   // LDR X0, [X0, #0xD0]
+0013F088 800000B4   // CBZ X0, 0x13F098
+0013F08C 018040BD   // LDR S1, [X0, #0x80]
+0013F090 0108211E   // FMUL S1, S0, S1
+0013F094 00040F2D   // STP S0, S1, [X0, #0x78]
+0013F098 20570090   // ADRP X0, 0xC23000
+0013F09C 006441F9   // LDR X0, [X0, #0x2C8]
+0013F0A0 400000B4   // CBZ X0, 0x13F0A8
+0013F0A4 008000BD   // STR S0, [X0, #0x80]
+0013F0A8 08348452   // MOV W8, #0x21A0             // =8608
+0013F0AC C0035FD6   // RET
+0013F0B0 01100091   // ADD X1, X0, #0x4
+0013F0B4 3008404C   // LD4 { V16.4S, V17.4S, V18.4S, V19.4S }, [X1]
+0013F0B8 01E00091   // ADD X1, X0, #0x38
+0013F0BC 3408404C   // LD4 { V20.4S, V21.4S, V22.4S, V23.4S }, [X1]
+0013F0C0 E5D6B34E   // FSUB V5.4S, V23.4S, V19.4S
+0013F0C4 E51F1C4E   // MOV V5.S[3], WZR
+0013F0C8 A5DC256E   // FMUL V5.4S, V5.4S, V5.4S
+0013F0CC A5D4256E   // FADDP V5.4S, V5.4S, V5.4S
+0013F0D0 A5D8307E   // FADDP S5, V5.2S
+0013F0D4 C0035FD6   // RET
 // Clock speed changes and pauses keep the current step
 00183084 007840BD   // LDR S0, [X0, #0x78] = pause keeps the current step (was LDR S0,[X0,#0x14], the config fps)
 0018308C 1F2003D5   // NOP = step already loaded (was FDIV S0,S1,S0)
@@ -164,7 +224,44 @@
 0013F140 100645B9   // LDR W16, [X16, #0x504]
 0013F144 0801106B   // SUBS W8, W8, W16
 0013F148 C0035FD6   // RET
-// Event timeline: non-audio-locked events step one frame, then hold one
+0013F14C EC03082A   // MOV W12, W8
+0013F150 E87EB69B   // UMULL X8, W23, W22
+0013F154 EF031EAA   // MOV X15, X30
+0013F158 E9060011   // ADD W9, W23, #0x1
+0013F15C 3F010C6B   // CMP W9, W12
+0013F160 E2030054   // B.HS 0x13F1DC
+0013F164 8002088B   // ADD X0, X20, X8
+0013F168 000040BD   // LDR S0, [X0]
+0013F16C 013440BD   // LDR S1, [X0, #0x34]
+0013F170 2138201E   // FSUB S1, S1, S0
+0013F174 CFFFFF97   // BL 0x13F0B0
+0013F178 A640201E   // FMOV S6, S5
+0013F17C 07E4002F   // MOVI D7, #0000000000000000
+0013F180 B7000034   // CBZ W23, 0x13F194
+0013F184 00D000D1   // SUB X0, X0, #0x34
+0013F188 CAFFFF97   // BL 0x13F0B0
+0013F18C A740201E   // FMOV S7, S5
+0013F190 00D00091   // ADD X0, X0, #0x34
+0013F194 E90A0011   // ADD W9, W23, #0x2
+0013F198 3F010C6B   // CMP W9, W12
+0013F19C 82000054   // B.HS 0x13F1AC
+0013F1A0 00D00091   // ADD X0, X0, #0x34
+0013F1A4 C3FFFF97   // BL 0x13F0B0
+0013F1A8 E768251E   // FMAXNM S7, S7, S5
+0013F1AC 0210261E   // FMOV S2, #16.00000000
+0013F1B0 E708221E   // FMUL S7, S7, S2
+0013F1B4 C020271E   // FCMP S6, S7
+0013F1B8 2D010054   // B.LE 0x13F1DC
+0013F1BC 2108211E   // FMUL S1, S1, S1
+0013F1C0 0210281E   // FMOV S2, #0.12500000
+0013F1C4 2208221E   // FMUL S2, S1, S2
+0013F1C8 C020221E   // FCMP S6, S2
+0013F1CC 8D000054   // B.LE 0x13F1DC
+0013F1D0 E00740BD   // LDR S0, [SP, #0x4]
+0013F1D4 0040251E   // FRINTM S0, S0
+0013F1D8 E00700BD   // STR S0, [SP, #0x4]
+0013F1DC E0011FD6   // BR X15
+// Event timeline: free-running events step on the 30 Hz tick
 00132AB0 1B000014   // B 0x132B1C = skip repeated static init (guard already set)
 00132AB4 6A424039   // LDRB W10,[X19,#0x10] = event flags
 00132AB8 0A010836   // TBZ W10,#1,parity = no audio sync
@@ -175,34 +272,37 @@
 00132ACC 6A8641B9   // LDR W10,[X19,#0x184] = sync mode
 00132AD0 5F050071   // CMP W10,#1
 00132AD4 00010054   // B.EQ done = audio-locked, holds itself
-00132AD8 AA5200B0   // ADRP X10,0xB87000
-00132ADC 4A3141F9   // LDR X10,[X10,#0x260]
-00132AE0 4A0140F9   // LDR X10,[X10] = game update state
-00132AE4 8A0000B4   // CBZ X10,done
-00132AE8 4A5940B9   // LDR W10,[X10,#0x58] = update counter
-00132AEC 4A000036   // TBZ W10,#0,done = even update steps
+00132AD8 09102E1E   // FMOV S9, #1.00000000 = v1 == 1.0: first step from frame 0
+00132ADC 0021291E   // FCMP S8, S9
+00132AE0 A0000054   // B.EQ 0x132AF4
+00132AE4 CAA500F0   // ADRP X10, 0x15ED000 = 30 Hz tick from the frame code
+00132AE8 4A315439   // LDRB W10, [X10, #0x50C]
+00132AEC 4A000035   // CBNZ W10, 0x132AF4 = tick: step, else hold (v1 = frame)
 00132AF0 685A41BD   // LDR S8,[X19,#0x158] = odd update holds (v1 = frame)
 00132AF4 091DA84E   // MOV V9.16B,V8.16B = v2 = v1 (replaced instruction)
 00132AF8 37000014   // B 0x132BD4
 00132BD0 B9FFFF17   // B 0x132AB4 (was MOV V9.16B,V8.16B)
-// Event timers counted in 30 Hz frames
-0010CCD8 01103C1E   // FMOV S1, #-0.5 = event sound start delay -0.5 frame per update
-0011606C 01103C1E   // FMOV S1, #-0.5 = event object timer -0.5 frame per update
-000C7AE0 E8031F32   // ORR W8, WZR, #0x2 = event sound start wait 2 (was 1)
+// Event timers counted in 30 Hz frames follow the step
+0010CCD8 CCCB0014   // B 0x13FC08 = event sound start delay -step x 30 per update (was FMOV S1,#-1.0)
+0011606C EBA60014   // B 0x13FC18 = event object timer -step x 30 per update (was FMOV S1,#-1.0)
+000C7AE0 56E00194   // BL 0x13FC38 = event sound start wait 1 frame in updates (was MOV W8,#1)
 00102F68 E80B1E32   // ORR W8, WZR, #0x1C = event wait 28 (was 14)
 00102F78 1F590071   // CMP W8, #0x16 = event wait trigger at 22 (was 11)
-00103204 E80F1E32   // ORR W8, WZR, #0x3C = event wait 60 (was 30)
-0013B194 C8088052   // MOV W8, #0x46 = post-event cooldown 70 (was 35)
-000F5C00 080A8052   // MOV W8, #0x50 = event fade-out wait 80 (was 40)
+00103204 8FF20094   // BL 0x13FC40 = event wait 30 frames in updates (was MOV W8,#0x1E)
+0013B194 AD120094   // BL 0x13FC48 = post-event cooldown 35 frames in updates (was MOV W8,#0x23)
+000F5C00 14280194   // BL 0x13FC50 = event fade-out wait 40 frames in updates (was MOV W8,#0x28)
 // Event characters: even per-update steps that track the timeline
-000E22A0 A0292D1E   // FADD S0, S13, S13 = attachment animation rate 2x the half step (was MOV V0.16B,V13.16B)
-000E22AC A0292D1E   // FADD S0, S13, S13 = attachment animation rate 2x the half step (was MOV V0.16B,V13.16B)
+000E22A0 62760194   // BL 0x13FC28 = attachment animation rate = smoothed step / (step x 30) (was MOV V0.16B,V13.16B)
+000E22AC 5F760194   // BL 0x13FC28 = attachment animation rate = smoothed step / (step x 30) (was MOV V0.16B,V13.16B)
 000E4A50 F7380114   // B 0x132e2c = move animation rate from the full-frame rate (was LDR S0,[SP,#0x18])
 000E51D8 804270BD   // LDR S0, [X20, #0x3040] = move animation rate from the full-frame rate (was the step at +0x303C)
 000E8870 214370BD   // LDR S1, [X25, #0x3040] = action playback speed from the full-frame rate (was +0x303C)
 000E8E28 014370BD   // LDR S1, [X24, #0x3040] = action playback speed from the full-frame rate (was +0x303C)
 0011F4C0 924D0014   // B 0x132b08 = character command component: smooth the step first (was LDR X8,[X19,#0x70])
 0011FDCC 4C4B0014   // B 0x132afc = character blend component: smooth the step first (was LDR X8,[X19,#0x70])
+00122890 F8740014   // B 0x13FC70 = event camera component: smooth the step first (was LDR X0,[X19,#0x68])
+00125278 8D950D54   // B.LE 0x140528 = updates between timeline frames: resample running effect tracks (was B.LE 0x125284)
+00125280 D76C0094   // BL 0x1405DC = run the effect command list, then resample its tracks (was BL 0xF3084)
 00132AFC 4E010094   // BL 0x133034 = hook_b
 00132B00 683A40F9   // LDR X8, [X19, #0x70]
 00132B04 B3B4FF17   // B 0x11fdd0
@@ -221,7 +321,7 @@
 00132D74 A0000054   // B.EQ 0x132d88
 00132D78 AF491253   // UBFX W15, W13, #18, #1
 00132D7C C0D9021E   // SCVTF S0, W14, #0xa
-00132D80 20000094   // BL 0x132e00
+00132D80 E4340094   // BL 0x140110 = per-update step from the filtered lag
 00132D84 02000014   // B 0x132d8c
 00132D88 4140201E   // FMOV S1, S2
 00132D8C 019C11BD   // STR S1, [X0, #0x119c]
@@ -238,17 +338,6 @@
 00132DF4 20025FD6   // RET X17
 00132DF8 EA031F2A   // MOV W10, WZR
 00132DFC 20025FD6   // RET X17
-00132E00 05102B1E   // FMOV S5, #0.37500000 = fcalc: step = clamp(0.5 + 0.25 x (lag - 0.5), 0, 1.5), base 0 when stalled
-00132E04 0610381E   // FMOV S6, #-0.12500000
-00132E08 FF010071   // CMP W15, #0x0
-00132E0C A51C261E   // FCSEL S5, S5, S6, NE
-00132E10 04102A1E   // FMOV S4, #0.25000000
-00132E14 0114041F   // FMADD S1, S0, S4, S5
-00132E18 06E4002F   // MOVI D6, #0000000000000000
-00132E1C 2168261E   // FMAXNM S1, S1, S6
-00132E20 06102F1E   // FMOV S6, #1.50000000
-00132E24 2178261E   // FMINNM S1, S1, S6
-00132E28 C0035FD6   // RET
 00132E2C E91240F9   // LDR X9, [X23, #0x20] = move_rate
 00132E30 204170BD   // LDR S0, [X9, #0x3040]
 00132E34 08C7FE17   // B 0xe4a54
@@ -300,7 +389,7 @@
 00133098 DF010C6B   // CMP W14, W12
 0013309C 80000054   // B.EQ 0x1330ac
 001330A0 C0D9021E   // SCVTF S0, W14, #0xa
-001330A4 57FFFF97   // BL 0x132e00
+001330A4 3E340094   // BL 0x14019C = step delivered on the previous update
 001330A8 0038211E   // FSUB S0, S0, S1
 001330AC AE451053   // UBFX W14, W13, #16, #2
 001330B0 4820201E   // FCMP S2, #0.0
@@ -326,6 +415,303 @@
 00133100 ECFF8F52   // MOV W12, #0x7fff
 00133104 8C410E2A   // ORR W12, W12, W14, LSL #16
 00133108 15FFFF17   // B 0x132d5c
+// Event step helpers
+0013FC04 3B000014   // B 0x13FCF0 = skip repeated static init (guard already set)
+0013FC08 70A500D0   // ADRP X16, 0x15ED000
+0013FC0C 010245BD   // LDR S1, [X16, #0x500]
+0013FC10 0038211E   // FSUB S0, S0, S1
+0013FC14 3334FF17   // B 0x10CCE0
+0013FC18 70A500D0   // ADRP X16, 0x15ED000
+0013FC1C 010245BD   // LDR S1, [X16, #0x500]
+0013FC20 0038211E   // FSUB S0, S0, S1
+0013FC24 1459FF17   // B 0x116074
+0013FC28 70A500D0   // ADRP X16, 0x15ED000
+0013FC2C 000245BD   // LDR S0, [X16, #0x500]
+0013FC30 A019201E   // FDIV S0, S13, S0
+0013FC34 C0035FD6   // RET
+0013FC38 28008052   // MOV W8, #0x1                // =1
+0013FC3C 07000014   // B 0x13FC58
+0013FC40 C8038052   // MOV W8, #0x1E               // =30
+0013FC44 05000014   // B 0x13FC58
+0013FC48 68048052   // MOV W8, #0x23               // =35
+0013FC4C 03000014   // B 0x13FC58
+0013FC50 08058052   // MOV W8, #0x28               // =40
+0013FC54 01000014   // B 0x13FC58
+0013FC58 70A500D0   // ADRP X16, 0x15ED000
+0013FC5C 100645B9   // LDR W16, [X16, #0x504]
+0013FC60 084D1453   // LSL W8, W8, #12
+0013FC64 0805500B   // ADD W8, W8, W16, LSR #1
+0013FC68 0809D01A   // UDIV W8, W8, W16
+0013FC6C C0035FD6   // RET
+0013FC70 F1CCFF97   // BL 0x133034
+0013FC74 01044091   // ADD X1, X0, #0x1, LSL #12   // =0x1000
+0013FC78 21600691   // ADD X1, X1, #0x198
+0013FC7C 603640F9   // LDR X0, [X19, #0x68]
+0013FC80 058BFF17   // B 0x122894
+0013FC84 69A500D0   // ADRP X9, 0x15ED000
+0013FC88 29511491   // ADD X9, X9, #0x514
+0013FC8C 280540BD   // LDR S8, [X9, #0x4]
+0013FC90 2A0940B9   // LDR W10, [X9, #0x8]
+0013FC94 6BA500D0   // ADRP X11, 0x15ED000
+0013FC98 6B811491   // ADD X11, X11, #0x520
+0013FC9C 6C0140B9   // LDR W12, [X11]
+0013FCA0 5F010C6B   // CMP W10, W12
+0013FCA4 00010054   // B.EQ 0x13FCC4
+0013FCA8 6A0100B9   // STR W10, [X11]
+0013FCAC 620940BD   // LDR S2, [X11, #0x8]
+0013FCB0 4228281E   // FADD S2, S2, S8
+0013FCB4 00E4002F   // MOVI D0, #0000000000000000
+0013FCB8 3F000071   // CMP W1, #0x0
+0013FCBC 021C221E   // FCSEL S2, S0, S2, NE
+0013FCC0 620900BD   // STR S2, [X11, #0x8]
+0013FCC4 680940BD   // LDR S8, [X11, #0x8]
+0013FCC8 00D02D1E   // FMOV S0, #0.93750000
+0013FCCC 0879201E   // FMINNM S8, S8, S0
+0013FCD0 C0035FD6   // RET
+// Baked event cameras: cuts stay instant
+000C8B50 64D70194   // BL 0x13E8E0 = sample at floor(t) across a baked cut (was FCMP S10,S9)
+000C8C6C D2DE0194   // BL 0x1407B4 = rotation blend: differences in matching Euler form (was FSUB S2,S2,S3)
+000C8C70 1F2003D5   // NOP = (was FSUB S0,S0,S1)
+000C8C74 1F2003D5   // NOP = (was FSUB S4,S4,S5)
+001407B0 15000014   // B 0x140804 = skip repeated static init (guard already set)
+001407B4 F1031EAA   // MOV X17, X30
+001407B8 4238231E   // FSUB S2, S2, S3
+001407BC 0038211E   // FSUB S0, S0, S1
+001407C0 8438251E   // FSUB S4, S4, S5
+001407C4 4AFFFF97   // BL 0x1404EC
+001407C8 11C0201E   // FABS S17, S0
+001407CC 9056A852   // MOV W16, #0x42B40000        // =1119092736
+001407D0 1202271E   // FMOV S18, W16
+001407D4 2022321E   // FCMP S17, S18
+001407D8 2D010054   // B.LE 0x1407FC
+001407DC 9066A852   // MOV W16, #0x43340000        // =1127481344
+001407E0 1202271E   // FMOV S18, W16
+001407E4 0028321E   // FADD S0, S0, S18
+001407E8 8428321E   // FADD S4, S4, S18
+001407EC 423A221E   // FSUB S2, S18, S2
+001407F0 4238231E   // FSUB S2, S2, S3
+001407F4 4238231E   // FSUB S2, S2, S3
+001407F8 3DFFFF97   // BL 0x1404EC
+001407FC 20025FD6   // RET X17
+001404E8 15000014   // B 0x14053C = skip repeated static init (guard already set)
+001404EC 306C8152   // MOV W16, #0xB61             // =2913
+001404F0 D066A772   // MOVK W16, #0x3B36, LSL #16
+001404F4 0702271E   // FMOV S7, W16
+001404F8 9076A852   // MOV W16, #0x43B40000        // =1135869952
+001404FC 1002271E   // FMOV S16, W16
+00140500 1108271E   // FMUL S17, S0, S7
+00140504 3142241E   // FRINTN S17, S17
+00140508 2082101F   // FMSUB S0, S17, S16, S0
+0014050C 5108271E   // FMUL S17, S2, S7
+00140510 3142241E   // FRINTN S17, S17
+00140514 228A101F   // FMSUB S2, S17, S16, S2
+00140518 9108271E   // FMUL S17, S4, S7
+0014051C 3142241E   // FRINTN S17, S17
+00140520 2492101F   // FMSUB S4, S17, S16, S4
+00140524 C0035FD6   // RET
+00140528 01008052   // MOV W1, #0x0                // =0
+0014052C 8BFFFF97   // BL 0x140358
+00140530 5593FF17   // B 0x125284
+001408FC 14000014   // B 0x14094C = skip repeated static init (guard already set)
+00140900 0D020054   // B.LE 0x140940
+00140904 A95400F0   // ADRP X9, 0xBD7000
+00140908 29413291   // ADD X9, X9, #0xC90
+0014090C 2AB551B9   // LDR W10, [X9, #0x11B4]
+00140910 4A3D0013   // SXTH W10, W10
+00140914 5F1D4071   // CMP W10, #0x7, LSL #12      // =0x7000
+00140918 2A010054   // B.GE 0x14093C
+0014091C 40D9021E   // SCVTF S0, W10, #0xA
+00140920 6CA500B0   // ADRP X12, 0x15ED000
+00140924 811945BD   // LDR S1, [X12, #0x518]
+00140928 0038211E   // FSUB S0, S0, S1
+0014092C 2029201E   // FADD S0, S9, S0
+00140930 00202B1E   // FCMP S0, S11
+00140934 69AD2A1E   // FCSEL S9, S11, S10, GE
+00140938 02000014   // B 0x140940
+0014093C 4941201E   // FMOV S9, S10
+00140940 FD7BC5A8   // LDP X29, X30, [SP], #0x50
+00140944 4021291E   // FCMP S10, S9
+00140948 C0035FD6   // RET
+0013E8DC 2D000014   // B 0x13E990 = skip repeated static init (guard already set)
+0013E8E0 4021291E   // FCMP S10, S9
+0013E8E4 41000054   // B.NE 0x13E8EC
+0013E8E8 C0035FD6   // RET
+0013E8EC FD7BBBA9   // STP X29, X30, [SP, #-0x50]!
+0013E8F0 00103E1E   // FMOV S0, #-1.00000000
+0013E8F4 4029201E   // FADD S0, S10, S0
+0013E8F8 E00314AA   // MOV X0, X20
+0013E8FC E1430091   // ADD X1, SP, #0x10
+0013E900 FF011494   // BL 0x63F0FC
+0013E904 401DAA4E   // MOV V0.16B, V10.16B
+0013E908 E00314AA   // MOV X0, X20
+0013E90C E1730091   // ADD X1, SP, #0x1C
+0013E910 FB011494   // BL 0x63F0FC
+0013E914 601DAB4E   // MOV V0.16B, V11.16B
+0013E918 E00314AA   // MOV X0, X20
+0013E91C E1A30091   // ADD X1, SP, #0x28
+0013E920 F7011494   // BL 0x63F0FC
+0013E924 819E59BD   // LDR S1, [X20, #0x199C]
+0013E928 21D8215E   // SCVTF S1, S1
+0013E92C 00103E1E   // FMOV S0, #-1.00000000
+0013E930 2128201E   // FADD S1, S1, S0
+0013E934 00102E1E   // FMOV S0, #1.00000000
+0013E938 6029201E   // FADD S0, S11, S0
+0013E93C 0078211E   // FMINNM S0, S0, S1
+0013E940 E00314AA   // MOV X0, X20
+0013E944 E1D30091   // ADD X1, SP, #0x34
+0013E948 ED011494   // BL 0x63F0FC
+0013E94C E18B432D   // LDP S1, S2, [SP, #0x1C]
+0013E950 E32740BD   // LDR S3, [SP, #0x24]
+0013E954 E417452D   // LDP S4, S5, [SP, #0x28]
+0013E958 E63340BD   // LDR S6, [SP, #0x30]
+0013E95C 8438211E   // FSUB S4, S4, S1
+0013E960 A538221E   // FSUB S5, S5, S2
+0013E964 C638231E   // FSUB S6, S6, S3
+0013E968 8708241E   // FMUL S7, S4, S4
+0013E96C A71C051F   // FMADD S7, S5, S5, S7
+0013E970 C71C061F   // FMADD S7, S6, S6, S7
+0013E974 E417422D   // LDP S4, S5, [SP, #0x10]
+0013E978 E61B40BD   // LDR S6, [SP, #0x18]
+0013E97C 72050014   // B 0x13FF44
+0013FF40 1B000014   // B 0x13FFAC = skip repeated static init (guard already set)
+0013FF44 2438241E   // FSUB S4, S1, S4
+0013FF48 4538251E   // FSUB S5, S2, S5
+0013FF4C 6638261E   // FSUB S6, S3, S6
+0013FF50 9008241E   // FMUL S16, S4, S4
+0013FF54 B040051F   // FMADD S16, S5, S5, S16
+0013FF58 D040061F   // FMADD S16, S6, S6, S16
+0013FF5C E10B452D   // LDP S1, S2, [SP, #0x28]
+0013FF60 E33340BD   // LDR S3, [SP, #0x30]
+0013FF64 E497462D   // LDP S4, S5, [SP, #0x34]
+0013FF68 E63F40BD   // LDR S6, [SP, #0x3C]
+0013FF6C 8438211E   // FSUB S4, S4, S1
+0013FF70 A538221E   // FSUB S5, S5, S2
+0013FF74 C638231E   // FSUB S6, S6, S3
+0013FF78 9108241E   // FMUL S17, S4, S4
+0013FF7C B144051F   // FMADD S17, S5, S5, S17
+0013FF80 D144061F   // FMADD S17, S6, S6, S17
+0013FF84 106A311E   // FMAXNM S16, S16, S17
+0013FF88 0410261E   // FMOV S4, #16.00000000
+0013FF8C 100A241E   // FMUL S16, S16, S4
+0013FF90 E020301E   // FCMP S7, S16
+0013FF94 0410281E   // FMOV S4, #0.12500000
+0013FF98 E8C4241E   // FCCMP S7, S4, #0x8, GT
+0013FF9C 59020014   // B 0x140900
+// Character and camera step filter
+0014010C 2D000014   // B 0x1401C0 = skip repeated static init (guard already set)
+00140110 70A500B0   // ADRP X16, 0x15ED000
+00140114 10521491   // ADD X16, X16, #0x514
+00140118 0C0A40B9   // LDR W12, [X16, #0x8]
+0014011C AE7D1353   // LSR W14, W13, #19
+00140120 9F010E6B   // CMP W12, W14
+00140124 61000054   // B.NE 0x140130
+00140128 010640BD   // LDR S1, [X16, #0x4]
+0014012C 18000014   // B 0x14018C
+00140130 0E0A00B9   // STR W14, [X16, #0x8]
+00140134 030240BD   // LDR S3, [X16]
+00140138 CC010C4B   // SUB W12, W14, W12
+0014013C 8C310012   // AND W12, W12, #0x1FFF
+00140140 9F050071   // CMP W12, #0x1
+00140144 630C201E   // FCSEL S3, S3, S0, EQ
+00140148 0438231E   // FSUB S4, S0, S3
+0014014C 05102A1E   // FMOV S5, #0.25000000
+00140150 830C051F   // FMADD S3, S4, S5, S3
+00140154 030200BD   // STR S3, [X16]
+00140158 06103C1E   // FMOV S6, #-0.50000000
+0014015C 6428261E   // FADD S4, S3, S6
+00140160 0610281E   // FMOV S6, #0.12500000
+00140164 8408261E   // FMUL S4, S4, S6
+00140168 05C25EBC   // LDUR S5, [X16, #-0x14]
+0014016C 8128251E   // FADD S1, S4, S5
+00140170 FF010071   // CMP W15, #0x0
+00140174 211C241E   // FCSEL S1, S1, S4, NE
+00140178 06E4002F   // MOVI D6, #0000000000000000
+0014017C 2168261E   // FMAXNM S1, S1, S6
+00140180 06102F1E   // FMOV S6, #1.50000000
+00140184 2178261E   // FMINNM S1, S1, S6
+00140188 010600BD   // STR S1, [X16, #0x4]
+0014018C 03C25EBC   // LDUR S3, [X16, #-0x14]
+00140190 2318231E   // FDIV S3, S1, S3
+00140194 03A811BD   // STR S3, [X0, #0x11A8]
+00140198 C0035FD6   // RET
+0014019C 70A500B0   // ADRP X16, 0x15ED000
+001401A0 10521491   // ADD X16, X16, #0x514
+001401A4 010640BD   // LDR S1, [X16, #0x4]
+001401A8 C0035FD6   // RET
+// Effect transform tracks between timeline frames
+00140354 2D000014   // B 0x140408 = skip repeated static init (guard already set)
+00140358 091840B9   // LDR W9, [X0, #0x18]
+0014035C 29040035   // CBNZ W9, 0x1403E0
+00140360 FD7BBCA9   // STP X29, X30, [SP, #-0x40]!
+00140364 F45701A9   // STP X20, X21, [SP, #0x10]
+00140368 F65F02A9   // STP X22, X23, [SP, #0x20]
+0014036C E81B00FD   // STR D8, [SP, #0x30]
+00140370 F70308AA   // MOV X23, X8
+00140374 F603012A   // MOV W22, W1
+00140378 2FCBFF97   // BL 0x133034
+0014037C E103162A   // MOV W1, W22
+00140380 41FEFF97   // BL 0x13FC84
+00140384 0821201E   // FCMP S8, #0.0
+00140388 4D020054   // B.LE 0x1403D0
+0014038C F4820991   // ADD X20, X23, #0x260
+00140390 957E43F9   // LDR X21, [X20, #0x6F8]
+00140394 94220091   // ADD X20, X20, #0x8
+00140398 F64F00D0   // ADRP X22, 0xB3E000
+0014039C D6E22391   // ADD X22, X22, #0x8F8
+001403A0 950100B4   // CBZ X21, 0x1403D0
+001403A4 892241B9   // LDR W9, [X20, #0x120]
+001403A8 E9000034   // CBZ W9, 0x1403C4
+001403AC 800640F9   // LDR X0, [X20, #0x8]
+001403B0 A00000B4   // CBZ X0, 0x1403C4
+001403B4 090040F9   // LDR X9, [X0]
+001403B8 3F0116EB   // CMP X9, X22
+001403BC 41000054   // B.NE 0x1403C4
+001403C0 6E000094   // BL 0x140578
+001403C4 94A20491   // ADD X20, X20, #0x128
+001403C8 B50600D1   // SUB X21, X21, #0x1
+001403CC F5FFFF17   // B 0x1403A0
+001403D0 E81B40FD   // LDR D8, [SP, #0x30]
+001403D4 F65F42A9   // LDP X22, X23, [SP, #0x20]
+001403D8 F45741A9   // LDP X20, X21, [SP, #0x10]
+001403DC FD7BC4A8   // LDP X29, X30, [SP], #0x40
+001403E0 C0035FD6   // RET
+00140574 25000014   // B 0x140608 = skip repeated static init (guard already set)
+00140578 FD7BBDA9   // STP X29, X30, [SP, #-0x30]!
+0014057C F35301A9   // STP X19, X20, [SP, #0x10]
+00140580 E91300FD   // STR D9, [SP, #0x20]
+00140584 F30300AA   // MOV X19, X0
+00140588 141440F9   // LDR X20, [X0, #0x28]
+0014058C 140200B4   // CBZ X20, 0x1405CC
+00140590 89A641B9   // LDR W9, [X20, #0x1A4]
+00140594 E92B00B9   // STR W9, [SP, #0x28]
+00140598 093840BD   // LDR S9, [X0, #0x38]
+0014059C 00103E1E   // FMOV S0, #-1.00000000
+001405A0 2029201E   // FADD S0, S9, S0
+001405A4 0028281E   // FADD S0, S0, S8
+001405A8 01E4002F   // MOVI D1, #0000000000000000
+001405AC 0068211E   // FMAXNM S0, S0, S1
+001405B0 003800BD   // STR S0, [X0, #0x38]
+001405B4 00800091   // ADD X0, X0, #0x20
+001405B8 00E4002F   // MOVI D0, #0000000000000000
+001405BC 2DC2FE97   // BL 0xF0E70
+001405C0 693A00BD   // STR S9, [X19, #0x38]
+001405C4 E92B40B9   // LDR W9, [SP, #0x28]
+001405C8 89A601B9   // STR W9, [X20, #0x1A4]
+001405CC E91340FD   // LDR D9, [SP, #0x20]
+001405D0 F35341A9   // LDP X19, X20, [SP, #0x10]
+001405D4 FD7BC3A8   // LDP X29, X30, [SP], #0x30
+001405D8 C0035FD6   // RET
+001405DC FD7BBFA9   // STP X29, X30, [SP, #-0x10]!
+001405E0 A9CAFE97   // BL 0xF3084
+001405E4 A05400F0   // ADRP X0, 0xBD7000
+001405E8 00403291   // ADD X0, X0, #0xC90
+001405EC 683640F9   // LDR X8, [X19, #0x68]
+001405F0 21008052   // MOV W1, #0x1                // =1
+001405F4 59FFFF97   // BL 0x140358
+001405F8 FD7BC1A8   // LDP X29, X30, [SP], #0x10
+001405FC C0035FD6   // RET
+// Baked animation curves: cuts stay instant
+00881280 B3F7E297   // BL 0x13F14C = vec3 curve: sample a baked cut at its start (was UMULL X8,W23,W22)
 // Wind and effect steps follow the game step
 00748658 A9DAE717   // B 0x13F0FC = wind step from the game step (was ADRP X8,0x9B5000)
 0085874C 709AE317   // B 0x13F10C = effect step = game step x 30 (was FMOV S8,#1.0)
