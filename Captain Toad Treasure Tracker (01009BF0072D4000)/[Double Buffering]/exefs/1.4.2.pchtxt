@@ -1,0 +1,25 @@
+@nsobid-41EAE379C103E9A512CFA931BA400E938B3B7C55
+
+# Captain Toad Treasure Tracker 1.4.2 - Double Buffering
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces a two-texture swapchain.
+//
+// Application::init builds its sead::GameFrameworkNx::CreateArg with
+// isTripleBuffer (+0x1D) set, which initializeGraphicsSystem hands to
+// sead::DisplayBufferNvn::setTripleBuffer; that sets the NVN window
+// texture count to 3. Passing false instead selects 2, so the CPU can run
+// at most one frame ahead of scanout, cutting a frame of input latency.
+
+@enabled
+00539A50 01008052   // MOV W1,#0 for setTripleBuffer (was LDRB W1,[X19,#0xBD])
+@stop
+
+// Offsets reverse-engineered against Captain Toad Treasure Tracker 1.4.2
+// (al + agl + sead, NVN). The retail build keeps its symbol table; every
+// site was located by symbol and byte-verified against the IDB before
+// being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

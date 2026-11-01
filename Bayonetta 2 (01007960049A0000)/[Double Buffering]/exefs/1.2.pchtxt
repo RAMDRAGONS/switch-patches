@@ -1,0 +1,25 @@
+@nsobid-F19B2E01E1794F933A9720C1404BB6F6
+
+# Bayonetta 2 1.2 - Double Buffering
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces a two-texture swapchain.
+//
+// The graphics init builds its nn::gfx SwapChainInfo with a buffer count of
+// 3, and the NVN window is created with that many textures. Using 2 instead
+// lets the CPU run at most one frame ahead of scanout, cutting a frame of
+// input latency. The scan buffer view arrays are filled up to the real
+// count and read through the acquired texture index, so their unused third
+// entry is never touched. The separate 3-slot fence ring is left as is.
+
+@enabled
+00DC2454 48008052   // MOV W8,#2 for SwapChainInfo buffer count (was MOV W8,#3)
+@stop
+
+// Offsets reverse-engineered against Bayonetta 2 1.2 (PlatinumGames "Hw"
+// framework, PRJ_010, NVN). The retail build is symbol-stripped; every site was
+// located by structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

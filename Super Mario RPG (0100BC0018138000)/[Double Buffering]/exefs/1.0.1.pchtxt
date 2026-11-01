@@ -1,0 +1,29 @@
+@nsobid-97F9664CFB2721546954CDEB3B303A4C
+
+# Super Mario RPG 1.0.1 - Double Buffering
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces a two-texture swapchain.
+//
+// Unity's NVN player creates the main window with 3 textures and picks how
+// many are active from the device's max queued frames (clamped to 2..3),
+// re-applying it with nvnWindowSetNumActiveTextures each frame. The device
+// starts that value at 3 and the game never changes it, since the managed
+// QualitySettings.maxQueuedFrames setter is stripped from this build.
+// Starting it at 2, and building the window with 2 active textures, keeps
+// the CPU at most one frame ahead of scanout.
+
+@enabled
+// GfxDevice max queued frames default
+006B5EE8 48008052   // MOV W8,#2 (was MOV W8,#3)
+// nvnWindowBuilderSetNumActiveTextures in NX_CreateBackBuffersAndWindow
+006CB418 41008052   // MOV W1,#2 (was LDR W1,[X23], texture count 3)
+@stop
+
+// Reverse-engineered against Super Mario RPG 1.0.1 (Unity 2021.3.15f1, URP,
+// IL2CPP). Names come from the game's own IL2CPP metadata; every offset was
+// byte-verified against the IDB.
+//
+// https://github.com/RAMDRAGONS/switch-patches

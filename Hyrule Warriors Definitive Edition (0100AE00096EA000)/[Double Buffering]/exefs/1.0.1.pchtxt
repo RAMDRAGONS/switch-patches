@@ -1,0 +1,25 @@
+@nsobid-815A2C19D176789688FF33EA875C26C5
+
+# Hyrule Warriors: Definitive Edition 1.0.1 - Double Buffering
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces a two-texture swapchain.
+//
+// KTGL's display setup fills a config block whose scan buffer count (3)
+// becomes the nn::gfx SwapChainInfo buffer count, and the NVN window is
+// built with that many textures. Using 2 instead lets the CPU run at most
+// one frame ahead of scanout, cutting a frame of input latency. The
+// renderer indexes its per-scan-buffer slots by the acquired texture index,
+// so it never touches the third slot.
+
+@enabled
+002ABF64 49008052   // MOV W9,#2 for the scan buffer count (was MOV W9,#3)
+@stop
+
+// Offsets reverse-engineered against Hyrule Warriors: Definitive Edition 1.0.1
+// (Koei Tecmo KTGL, NVN). The retail build is symbol-stripped; every site was
+// located by structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

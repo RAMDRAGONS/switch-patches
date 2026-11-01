@@ -1,0 +1,28 @@
+@nsobid-5CC7A76ED820CF4C45AA7B935C79307F
+
+# THEATRHYTHM FINAL BAR LINE 1.0.5 - Double Buffering
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces a two-texture swapchain.
+//
+// Unity's NVN player creates the main window with 3 textures and picks how
+// many are active from the device's max queued frames (clamped to 2..3),
+// re-applying it with nvnWindowSetNumActiveTextures each frame. The device
+// starts that value at 3 and the game never changes it: only the getter of
+// QualitySettings.maxQueuedFrames is bound in this build. Starting it at 2,
+// and building the window with 2 active textures, keeps the CPU at most one
+// frame ahead of scanout.
+
+@enabled
+// GfxDevice max queued frames default
+01315D4C 48008052   // MOV W8,#2 (was MOV W8,#3)
+// nvnWindowBuilderSetNumActiveTextures at window creation
+013307B8 41008052   // MOV W1,#2 (was LDR W1, texture count 3)
+@stop
+
+// Reverse-engineered against the Unity NX player in main (build id above).
+// Every offset here was located by signature and byte-verified.
+//
+// https://github.com/RAMDRAGONS/switch-patches

@@ -1,0 +1,24 @@
+@nsobid-592C7051A4E620563D0296096D8F0AC5
+
+# Splatoon 2 5.5.2 - Double Buffering
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces a two-texture swapchain.
+//
+// The application builds its sead::GameFrameworkNx::CreateArg with
+// isTripleBuffer (+0x1D) set, which initializeGraphicsSystem hands to
+// sead::DisplayBufferNvn::setTripleBuffer; that sets the NVN window
+// texture count to 3. Passing false instead selects 2, so the CPU can run
+// at most one frame ahead of scanout, cutting a frame of input latency.
+
+@enabled
+01710C1C 01008052   // MOV W1,#0 for setTripleBuffer (was LDRB W1,[X19,#0xBD])
+@stop
+
+// Offsets reverse-engineered against the Cstm/Lp + gsys/agl + sead engine;
+// 5.5.2 is symbol-stripped, so every site here was matched by structure and
+// byte-verified.
+//
+// https://github.com/RAMDRAGONS/switch-patches

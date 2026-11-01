@@ -1,0 +1,25 @@
+@nsobid-4B159F0F7A360669738390EE8657B4F0
+
+# ASTRAL CHAIN 1.0.1 - Double Buffering
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces a two-texture swapchain.
+//
+// The display setup creates three window textures and passes all of them to
+// nvnWindowBuilderSetTextures. Passing a count of 2 makes the window cycle
+// through the first two only, so the CPU can run at most one frame ahead of
+// scanout, cutting a frame of input latency. The final render target is
+// picked as window textures + acquired index * 0xC0, so the third texture
+// is simply never used.
+
+@enabled
+009E8D68 41008052   // MOV W1,#2 for nvnWindowBuilderSetTextures (was MOV W1,#3)
+@stop
+
+// Offsets reverse-engineered against ASTRAL CHAIN 1.0.1 (PlatinumGames "Hw"
+// framework, PRJ_036, NVN). The retail build is symbol-stripped; every site was
+// located by structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

@@ -1,0 +1,32 @@
+@nsobid-6830B3A12406CB4716FEC5ADDC35D3E2DC92D212
+
+# Splatoon 3 11.2.0 - Double Buffering
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Forces a two-texture swapchain.
+//
+// nnMain builds the sead::GameFrameworkNx::CreateArg with isTripleBuffer
+// (+0x1D) set, so the NVN window starts with 3 textures. The present path
+// then switches between 2 and 3 active textures at runtime: it raises the
+// count to 3 whenever a frame takes longer than the framework's threshold
+// and drops back to 2 once frames are short again, and a pending request
+// byte (+0x225) can force either count. Every route to 3 is closed here,
+// so the CPU can run at most one frame ahead of scanout.
+
+@enabled
+// initial buffer count: isTripleBuffer read as false
+04529600 09008052   // MOV W9,#0 (was LDRB W9,[X19,#0xA5])
+// slow-frame auto switch from 2 to 3 never fires
+0452AAB4 12000014   // B to the present call (was B.LE)
+// a triple-buffer request (1) selects 2, like the double-buffer request (0)
+0452AACC 3F090071   // CMP W9,#2 (was CMP W9,#3)
+0452AAD4 41008052   // MOV W1,#2 (was MOV W1,#3)
+@stop
+
+// Offsets reverse-engineered against Splatoon 3's sead + spl::gfx + agl/gsys
+// engine; 11.2.0 retail is symbol-stripped, so every site was located by
+// structure and byte-verified against the IDB.
+//
+// https://github.com/RAMDRAGONS/switch-patches
