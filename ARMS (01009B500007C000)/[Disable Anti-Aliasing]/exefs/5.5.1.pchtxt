@@ -1,0 +1,42 @@
+@nsobid-BBA3811191DE71D9B55E53F918AE5DC1
+
+# ARMS 5.5.1 - Disable anti-aliasing
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Disables every post-process anti-aliasing pass and the temporal AA camera
+// jitter.
+//
+// All of the game's AA is drawn through agl::pfx::FilterAA at the end of the
+// gsys final-image pass. Besides agl's own FXAA and ReduceAA, the game binds
+// its own AA module to the filter's draw callback. That module picks one of
+// FXAA, luma FXAA, temporal AA, a second temporal mode, or SMAA (with an
+// optional temporal 2x), and the game switches it between luma FXAA and SMAA by
+// view.
+//
+// Whether the filter runs is one test: the scene allows AA, the filter is
+// enabled, and its scale is above zero. It is inlined into the three functions
+// that plan and draw the frame (sub_7100A2587C picks the scene's render target,
+// sub_7100A26DFC sizes it, sub_7100A27070 routes the image through the filter).
+// Each copy now takes its false result, so the scene renders straight to the
+// final target as it does when the filter is off, and neither agl's modes nor
+// the game's module draw.
+//
+// The temporal modes also offset the projection by a sub-pixel jitter every
+// frame, set up in sub_7100173210 when the module's jitter flag is on. Without
+// the resolve pass that jitter would show as shaking, so the branch into the
+// jitter path is removed and the unjittered view matrices are used.
+
+@enabled
+00A25934 05000014   // B to the AA-off result, render target plan (was LDR S0,[X20,#0xA58] = FilterAA scale)
+00A26ED8 0A000014   // B to the AA-off result, render buffer alloc (was LDR S0,[X20,#0xA58])
+00A27110 05000014   // B to the AA-off result, final image (was LDR S0,[X21,#0xA58])
+001732A4 1F2003D5   // NOP (was TBNZ W8,#3 = take the temporal AA jitter path)
+@stop
+
+// Offsets reverse-engineered against ARMS 5.5.1 (Cstm/Lp + gsys/agl + sead,
+// NVN). The retail build is symbol-stripped; every site was located by
+// structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

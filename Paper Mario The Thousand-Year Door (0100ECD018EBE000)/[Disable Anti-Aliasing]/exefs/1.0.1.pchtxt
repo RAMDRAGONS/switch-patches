@@ -1,0 +1,49 @@
+@nsobid-0EFFE4AF1DEC3A7966B934D4A7C3D2BF566A9C62
+
+# Paper Mario: The Thousand-Year Door 1.0.1 - Disable anti-aliasing
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Disables the game's anti-aliasing, the FXAA pass (gfx::filters::Fxaa, shader
+// aa/fxaa). It is the only AA filter in the renderer.
+//
+// Render passes are skipped while any of bits 0-2 of their flag word (+0x58) is
+// set, and the pass before FXAA checks that word every frame: with FXAA skipped
+// it draws straight into the output target, the renderer's own no-FXAA path.
+// The pass is now registered with bit 0 set (the approach of KeatonTheBot's
+// Disable AA mod), so it never runs by default.
+//
+// The FXAA pass is also where the sepia filter is applied: script
+// gfx::SetSepiaColorFilter(float alpha) stores alpha on it, and the epilogue
+// map (aaa_00_Epilogue) sets it to 1.0 and back to 0. Skipping the pass
+// outright would drop that tint, so SetSepiaColorFilter (sub_71005E91C0) now
+// also clears bit 0 while alpha is non-zero and sets it again at zero. Its
+// dynamic_cast is dropped to make room; the object is already found by its
+// registered name "FXAA".
+//
+// While sepia runs the pass is active again, so its FXAA sample offsets are
+// zeroed as well: every store of rcpFrame (1/width, 1/height) in the
+// constructor (sub_7100255490) and the per-frame update (sub_7100255AB4) writes
+// zero, so FXAA reads only the centre pixel and outputs it unchanged with sepia
+// applied.
+
+@enabled
+0035EAF4 28008052   // MOV W8,#1: FXAA pass flags = skip (was LDR W8,[X23,#0x58])
+// SetSepiaColorFilter: str s8,[x0,#0x780]; ldr w8,[x0,#0x58]; and w8,w8,#~1;
+// fcmp s8,#0.0; cset w9,eq; orr w8,w8,w9; str w8,[x0,#0x58]; b 0x5E924C
+005E922C 088007BD085840B908791F120821201EE9179F1A0801092A085800B901000014   // (was the dynamic_cast to gfx::filters::Fxaa and STR S8,[X0,#0x780])
+002557B0 1F0000B9   // STR WZR,[X0]: constructor, buffer 0 rcpFrame.x (was STR S0,[X0])
+002557C0 1F0400B9   // STR WZR,[X0,#4]: constructor, buffer 0 rcpFrame.y (was STR S1,[X0,#4])
+00255884 1F0000B9   // STR WZR,[X0]: constructor, buffer 1 rcpFrame.x (was STR S0,[X0])
+00255894 1F0400B9   // STR WZR,[X0,#4]: constructor, buffer 1 rcpFrame.y (was STR S1,[X0,#4])
+00255BA4 1F0000B9   // STR WZR,[X0]: per frame rcpFrame.x (was STR S0,[X0])
+00255BB8 1F0400B9   // STR WZR,[X0,#4]: per frame rcpFrame.y (was STR S3,[X0,#4])
+@stop
+
+// Offsets reverse-engineered against Paper Mario: The Thousand-Year Door 1.0.1
+// (Intelligent Systems gfx engine, nn::gfx/NVN). The retail build keeps RTTI
+// only; every site was located by structure and byte-verified against the IDB
+// before being written. Pass-skip idea from KeatonTheBot's Disable AA mod.
+//
+// https://github.com/RAMDRAGONS/switch-patches

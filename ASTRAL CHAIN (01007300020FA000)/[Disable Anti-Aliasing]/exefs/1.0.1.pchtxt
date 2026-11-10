@@ -1,0 +1,34 @@
+@nsobid-4B159F0F7A360669738390EE8657B4F0
+
+# ASTRAL CHAIN 1.0.1 - Disable anti-aliasing
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Disables the game's anti-aliasing. Its only live AA pass is SMAA, run as the
+// three FilterSMAAEdge / FilterSMAAWeight / FilterSMAABlend passes at the very
+// end of the frame. The binary also loads MLAA (FilterShaderEdgeMLAA / MLAA /
+// BlendMLAA), DLAA (FilterShaderDLAA1 / DLAA2) and FilterSMAACopy programs, but
+// nothing draws with them, and there is no FXAA filter.
+//
+// One flag decides whether the SMAA chain runs. It is the AND of three
+// conditions: the AA quality setting allows it, the game is docked, and the
+// renderer's SMAA feature bit is set. When it is true the tone-mapped image is
+// redirected into a scratch target and the SMAA chain blends it onto the real
+// one; when it is false the image goes straight to the real target and the
+// chain is skipped. Handheld mode already takes that second path every frame,
+// so forcing the flag to zero produces the engine's own no-AA output rather
+// than a new code path.
+//
+// This patches the frame code, not a config default, so an option screen or a
+// settings file cannot turn it back on.
+
+@enabled
+00402AE0 19008052   // MOVZ W25,#0 (was AND W25,W9,W8,LSR#26 = the SMAA enable flag)
+@stop
+
+// Offsets reverse-engineered against ASTRAL CHAIN 1.0.1 (PlatinumGames "Hw"
+// framework, PRJ_036, NVN). The retail build is symbol-stripped; every site was
+// located by structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

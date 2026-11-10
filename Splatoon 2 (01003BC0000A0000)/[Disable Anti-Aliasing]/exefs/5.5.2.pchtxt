@@ -1,0 +1,35 @@
+@nsobid-592C7051A4E620563D0296096D8F0AC5
+
+# Splatoon 2 5.5.2 - Disable anti-aliasing
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Disables every post-process anti-aliasing pass.
+//
+// All of the game's AA is agl::pfx::FilterAA, drawn at the end of
+// gsys::ModelSceneBuffer::drawFinalImage. Its modes are FXAA, ReduceAA and a
+// draw callback. The game's GfxMgr binds its own SMAA (edge detection, blend
+// weights, neighborhood blending) to that callback when it loads a scene, so
+// SMAA, not FXAA, is the AA normally drawn.
+//
+// Whether the filter runs is one test: the scene allows AA, the filter is
+// enabled, and its scale is above zero. It is inlined into each function that
+// plans or draws the frame: calcView picks the scene's render target,
+// allocRenderBuffer sizes it, and drawFinalImage routes the image through the
+// filter. Each copy now takes its false result, so the scene renders straight
+// to the final target as it does when a scene turns the filter off, and no AA
+// pass runs whatever mode or parameters a scene or environment file selects.
+
+@enabled
+01803738 05000014   // B to the AA-off result in calcView (was LDR S0,[X,#0xE48] = FilterAA scale)
+01805078 08000014   // B to the AA-off result in allocRenderBuffer (was LDR S0,[X,#0xE48] = FilterAA scale)
+0180539C 05000014   // B to the AA-off result in drawFinalImage (was LDR S0,[X,#0xE48] = FilterAA scale)
+@stop
+
+// Offsets reverse-engineered against Splatoon 2 5.5.2 (agl/gsys + Lp + sead,
+// NVN). The retail build is symbol-stripped; every site was matched to the
+// symbol-bearing 1.1.0 QA build by structure and byte-verified against the IDB
+// before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

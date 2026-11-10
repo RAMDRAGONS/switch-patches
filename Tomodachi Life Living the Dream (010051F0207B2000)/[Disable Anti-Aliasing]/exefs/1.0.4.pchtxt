@@ -1,0 +1,37 @@
+@nsobid-B39FEF373FB12154385D012AAB3BC99EF2944470
+
+# Tomodachi Life: Living the Dream [010051F0207B2000] v1.0.4 - Disable anti-aliasing
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Disables every post-process anti-aliasing pass.
+//
+// All of the game's AA is agl::pfx::FilterAA, which dispatches on its
+// antialias_type: 0 = FXAA (with history reprojection), 1 = ReduceAA, 2 = SMAA,
+// 3 = a draw callback. Two renderers use it.
+//
+// The gsys final-image pass (sub_71001B2770) runs it when one test passes: the
+// scene allows AA, the filter's scale is above zero, and the filter is enabled.
+// A per-frame setup (sub_71001C3C64) repeats the test before it rewrites the
+// filter's mode and scale. Both copies now take their false result, so the
+// final image takes the engine's own no-AA route whatever the filter's
+// parameters say.
+//
+// The snapshot renderer (sub_710058EEC8, whose targets are named SnapshotCmp,
+// SnapshotPfx and SnapshotDepth) calls the filter directly and in place: the
+// texture it samples is the color target it draws to. With AA off the filter
+// would copy that texture onto itself, which emulators can show as flickering
+// tiles. The call is removed instead, since the texture already holds the
+// unfiltered image.
+
+@enabled
+001B27C4 2E000014   // B to the AA-off result in the final-image pass (was LDR S0,[X21,#0xC80] = FilterAA scale)
+001C3CB8 03000014   // B to the return in the per-frame AA setup (was LDR S0,[X0,#0xC80])
+005943D4 1F2003D5   // NOP (was BL sub_71021A3974 = snapshot FilterAA draw)
+@stop
+
+// Same agl/gsys FilterAA family as Splatoon 2; every site was derived in
+// main.i64 for this build and byte-verified, not offset-guessed.
+//
+// https://github.com/RAMDRAGONS/switch-patches

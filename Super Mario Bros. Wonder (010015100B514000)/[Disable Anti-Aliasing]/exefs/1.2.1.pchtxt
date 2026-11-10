@@ -1,0 +1,30 @@
+@nsobid-FF773E90972D544EB79406EAA65396D53C43EFB9
+
+# Super Mario Bros. Wonder 1.2.1 - Disable anti-aliasing
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Disables every post-process anti-aliasing pass.
+//
+// All of the game's AA is agl::pfx::FilterAA, drawn at the end of the gsys
+// final-image pass (sub_710015EA50). It dispatches on antialias_type: 0 = FXAA
+// (with history reprojection), 1 = ReduceAA, 2 = SMAA, 3 = a draw callback.
+//
+// Whether the filter runs at all is one test in that pass: the scene allows AA,
+// the filter's scale is above zero, and the filter is enabled. When it fails,
+// the pass resolves the scene buffer straight to the final target, the same
+// path a scene with the filter switched off takes. The test now always fails,
+// so no AA mode runs whatever antialias_type, enable flag or scale a scene or
+// environment file sets.
+
+@enabled
+0015EE10 07060014   // B to the AA-off result (was LDR S0,[X5,#0x2838] = FilterAA scale)
+@stop
+
+// Offsets reverse-engineered against Super Mario Bros. Wonder 1.2.1 (sead +
+// agl/gsys ModuleSystem, NVN). The retail build is symbol-stripped; the site
+// was located by structure and byte-verified against the IDB before being
+// written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

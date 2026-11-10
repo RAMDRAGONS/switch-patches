@@ -1,0 +1,29 @@
+@nsobid-28C4287AEE36F7499DA60F3E68B54C70DA382D75
+
+# Splatoon 3 11.3.0 - Disable anti-aliasing
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Disables every post-process anti-aliasing pass.
+//
+// All of the game's AA is agl::pfx::FilterAA, drawn at the end of the gsys
+// final-image pass (sub_7104701280). It dispatches on antialias_type: 0 = FXAA
+// (with history reprojection), 1 = ReduceAA, 2 = SMAA, 3 = a draw callback.
+//
+// Whether the filter runs at all is one test in that pass: the scene allows AA,
+// the filter's scale is above zero, and the filter is enabled. When it fails,
+// the pass resolves the scene buffer straight to the final target, the same
+// path a scene with the filter switched off takes. The test now always fails,
+// so no AA mode runs whatever antialias_type, enable flag or scale a scene or
+// environment file sets.
+
+@enabled
+047012DC 06000014   // B to the AA-off result (was LDR S0,[X2,#0xE90] = FilterAA scale)
+@stop
+
+// Offsets reverse-engineered against Splatoon 3's sead + Cmn/spl::gfx +
+// agl/gsys engine. 11.3.0 retail is symbol-stripped; the site was located by
+// structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

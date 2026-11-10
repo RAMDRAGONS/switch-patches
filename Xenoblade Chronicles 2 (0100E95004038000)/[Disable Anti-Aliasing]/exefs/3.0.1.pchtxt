@@ -1,0 +1,35 @@
+@nsobid-4F5C96E2D97F45AC288BC67613EBEF0A
+
+# Xenoblade Chronicles 2 3.0.1 - Disable anti-aliasing
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Disables the game's anti-aliasing: FXAA in the final composite and the
+// temporal AA (tmaa).
+//
+// Both are switches in the post-effect parameter file the renderer parses
+// (sub_7100716E68): "AntiAliasing" and "tmaa", each "on" or "off".
+// sub_71007A1204 copies them into the frame's render state (+0xFC and +0x111),
+// and sub_71007A0774 resets the state with AntiAliasing on. When either is on,
+// the frame ends in the AA composite (FXAA, sub_710079C930) or the temporal
+// resolve (sub_71007F7274), and tmaa also drives the temporal history and
+// jitter users.
+//
+// Every write of the two switches now stores off. The frame then takes the
+// renderer's own no-AA final composite, the path the parameter file selects
+// when both are set to off, so FXAA, the temporal resolve and its jitter all
+// stop.
+
+@enabled
+007A098C 7FF20339   // STRB WZR,[X19,#0xFC]: reset leaves AntiAliasing off (was STRB W16 = on)
+007A1278 7FF20339   // STRB WZR,[X19,#0xFC]: AntiAliasing off for render mode 1, which forces it on (was STRB W20)
+007A12F4 7F460439   // STRB WZR,[X19,#0x111]: tmaa off (was STRB W8 = parameter file value)
+007A12FC 7FF20339   // STRB WZR,[X19,#0xFC]: AntiAliasing off (was STRB W8 = parameter file value)
+@stop
+
+// Offsets reverse-engineered against Xenoblade Chronicles 2 3.0.1 (Monolith
+// engine, NVN). The retail build is symbol-stripped; every site was located by
+// structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches

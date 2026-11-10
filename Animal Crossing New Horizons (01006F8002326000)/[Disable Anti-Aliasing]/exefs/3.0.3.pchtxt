@@ -5,23 +5,28 @@
 @flag print_values
 @flag offset_shift 0x100
 
-// Disables the post-process anti-aliasing pass.
+// Disables every post-process anti-aliasing pass.
 //
-// agl::pfx::FilterAA draws the final image through one of its AA modes,
-// picked by an antialias_type parameter that scene settings can change:
-// 0 = FXAA, 1 = ReduceAA, 2 = SMAA. When the filter
-// is off it instead copies the image through unchanged. The FXAA and SMAA
-// cases are redirected to that pass-through copy, so the output is the
-// engine's own no-AA image and a scene selecting either mode cannot turn
-// edge AA back on. ReduceAA is left alone.
+// All of the game's AA is agl::pfx::FilterAA, drawn at the end of the gsys
+// final-image pass (sub_7103939550). It dispatches on an antialias_type that
+// scene settings can change: 0 = FXAA (with history reprojection), 1 =
+// ReduceAA, 2 = SMAA, 3 = a draw callback.
+//
+// Whether the filter runs is one test: the scene allows AA, the filter's scale
+// is above zero, and the filter is enabled. It is made twice: the view setup
+// (sub_710393787C) asks for the scene's AA render target when it passes, and
+// the final-image pass routes the image through the filter. Both copies now
+// take their false result, so the scene renders straight to the final target as
+// it does when a scene turns the filter off, and no AA mode runs whatever
+// antialias_type, enable flag or scale is set.
 
 @enabled
-0393EA08 46000014   // B pass-through (FXAA case, was LDR S0,[X21,#0x988])
-0393ECF4 8BFFFF17   // B pass-through (SMAA case, was MOV X0,X21)
+039378E0 E8031F2A   // MOV W8,WZR: view setup never requests the AA target (was CSEL W8,W8,WZR,NE)
+039395B0 06000014   // B to the AA-off result in the final-image pass (was LDR S0,[X21,#0xE30] = FilterAA scale)
 @stop
 
-// Offsets reverse-engineered against Animal Crossing: New Horizons 3.0.3
-// (sead + agl/gsys, NVN). The retail build is symbol-stripped; every site was
-// located by structure and byte-verified against the IDB before being written.
+// Offsets reverse-engineered against Animal Crossing: New Horizons 3.0.3 (sead
+// + agl/gsys, NVN). The retail build is symbol-stripped; every site was located
+// by structure and byte-verified against the IDB before being written.
 //
 // https://github.com/RAMDRAGONS/switch-patches

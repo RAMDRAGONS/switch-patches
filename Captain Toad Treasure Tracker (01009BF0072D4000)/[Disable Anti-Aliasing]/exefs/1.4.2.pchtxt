@@ -1,0 +1,33 @@
+@nsobid-41EAE379C103E9A512CFA931BA400E938B3B7C55
+
+# Captain Toad Treasure Tracker 1.4.2 - Disable anti-aliasing
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Disables both of the game's anti-aliasing methods.
+//
+// The StressParam AntiAliasingType chooses between them each frame. Type 0 runs
+// agl::pfx::FilterAA (FXAA, ReduceAA, SMAA or a callback, by its
+// antialias_type) at the end of al::ViewRenderer::drawView, and falls back to
+// pseudo AA when the FXAA alpha-out parameter is zero. Type 2 is pseudo AA:
+// al::GraphicsStressDirector::movement alternates a sub-pixel projection
+// offset (0, then 0.25 over the buffer size) every frame and drawView adds it
+// to the camera, so edges average out over two frames. Type 1 uses neither.
+//
+// al::GraphicsSystemInfo::preDrawGraphics rewrites FilterAA's enable flag every
+// frame from that choice. It now always stores false, so drawView takes its own
+// no-filter path regardless of the type or any FilterAA parameter. drawView's
+// check for pseudo AA now branches straight past the offset, so the camera
+// stays put. The result is the image type 1 produces.
+
+@enabled
+002DBE6C 1F2003D5   // NOP: FilterAA enable is always stored as false (was CBZ W8 on AntiAliasingType == 0)
+002DE86C 14000014   // B past the pseudo AA projection offset (was CMP W8,#2 on AntiAliasingType)
+@stop
+
+// Offsets reverse-engineered against Captain Toad Treasure Tracker 1.4.2 (al +
+// agl + sead, NVN). The retail build keeps its symbol table; every site was
+// located by symbol and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches
