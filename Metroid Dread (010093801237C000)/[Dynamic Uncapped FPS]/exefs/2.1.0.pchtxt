@@ -1,0 +1,153 @@
+@nsobid-646761F643AFEBB379EDD5E6A5151AF2CEF93DC1
+
+# Metroid Dread 2.1.0 - Dynamic uncapped FPS
+
+@flag print_values
+@flag offset_shift 0x100
+
+// Runs at whatever rate the emulator's refresh rate allows (Ryujinx custom
+// refresh rate, e.g. 120/144/240) with game speed, physics and menus matching
+// 60 FPS. On hardware it behaves like the [Full Framerate Cutscenes] mod.
+//
+// The game already measures every frame and steps by real time, and presents
+// with NVN interval 1, so it uncaps by itself once the emulator refresh is
+// raised. V-Sync is kept: the present interval is never set to 0. This mod fixes
+// what still depended on the frame rate:
+//
+// 1. Cutscenes: same two records as [Full Framerate Cutscenes] (interval 1
+//    instead of 2 in cinematics, real frame timer instead of the audio stream
+//    position). Do not enable both mods; this one includes them.
+//
+// 2. Pause/in-game and main menu GUI roots ignore the frame time they are given
+//    and advance their widgets by a fixed 1/60 s (1/fps) per update, so their
+//    animations and timers ran 2x fast at 120 FPS. They now use the real frame
+//    time (the frame timer's microsecond delta, unaffected by game time scale).
+//
+// 3. Samus' position integration emulates the 60 FPS result at any rate.
+//    Forces are integrated into velocity once per frame and the position then
+//    moves by velocity * dt (semi-implicit Euler), so jump height depended on
+//    the frame rate: peaks of 371 / 385.5 / 392.6 / 394.8 units at
+//    30 / 60 / 120 / 240 FPS. The 60 FPS result equals exact motion plus
+//    F * t * (1/60 - t) / 2 per frame, so the force integrator publishes
+//    half the forces for its actor, and the start of Samus' collision sweep adds
+//    that term to the displacement it moves by, so collision still applies.
+//    The engine's own 1/fps is used for 1/60 (1/30 in cinematics, as stock).
+//    No correction on y while the fall speed sits at the terminal clamp, where
+//    stock 60 FPS has no Euler error either. Measured peaks after the fix:
+//    385.4 / 385.5 / 385.6 / 385.6, landing within one frame of 60 FPS.
+//    Other actors keep the engine's integration (within ~2% of 60 FPS).
+//
+// 4. A positional push spread over updates added 20% of the remainder each
+//    update (done in 5 updates = 83 ms at 60 FPS, 21 ms at 240). It now adds
+//    12 * dt per update, 0.2 at 60 FPS; the existing overshoot trim keeps the
+//    total distance exact.
+//
+// Space and state: the matrix copy at the end of sub_978C24 is rewritten with
+// two LDP/STP Q pairs, which frees 23 instructions there for the correction
+// code. The force integrator's tail (sub_10D18E4) is rewritten with FMADD to
+// make room for publishing the forces. 16 bytes of RW state live in the unused
+// tail of the last .bss page (main+0x72A18FC0).
+//
+// Source of the physics records (clang/ld.lld, module offsets):
+//
+//   0x10D1A2C (sub_10D18E4 tail: v += F*dt, clear F and 0x1E4, publish F/2)
+//     add x8,x19,#0x1d8 / ldp s1,s0,[x8] / ldr s2,[x8,#8]
+//     ldp s3,s4,[x8,#0x30] / ldr s5,[x8,#0x38]
+//     fmadd s1,s3,s8,s1 / fmadd s0,s4,s8,s0 / fmadd s2,s5,s8,s2
+//     stp s1,s0,[x8] / str s2,[x8,#8]
+//     str xzr,[x8,#0x30] / str wzr,[x8,#0x38] / str xzr,[x8,#0xc] / str wzr,[x8,#0x14]
+//     fmov s6,#0.5 / fmul s3,s3,s6 / fmul s4,s4,s6
+//     adrp x9,glob / str x19,[x9,:lo12:glob]
+//     str s3,[x9,:lo12:glob+8] / str s4,[x9,:lo12:glob+12]
+//   0x978E70 (sub_978C24 matrix copy)
+//     ldp q16,q17,[x29,#-0x60] / ldp q18,q19,[x29,#-0x40] / add x10,x19,#0xb8
+//     stp q16,q17,[x10] / stp q18,q19,[x10,#0x20]
+//     str s0,[x19,#0xc4] / str s1,[x19,#0xd4] / str s2,[x19,#0xe4] / b 0x978EF0
+//   0x978E94 (cave, called from the start of sub_9E87D0, Samus' sweep)
+//     adrp x9,glob / add x9,x9,:lo12:glob / ldr x10,[x9] / cmp x10,x24 / b.ne 2f
+//     str xzr,[x9] / adrp x10,timer / ldr x10,[x10,:lo12:timer]
+//     ldr s16,[x10,#0x44] / fsub s16,s16,s8 / fmul s16,s16,s8
+//     ldp s17,s18,[x9,#8] / ldp s19,s20,[x20,#0x60] / fmadd s19,s17,s16,s19
+//     ldr x11,[x24,#0x5458] / ldr s21,[x11,#0xb4] / ldr s22,[x24,#0x1dc]
+//     fcmp s22,s21 / b.le 1f / fmadd s20,s18,s16,s20
+//   1: stp s19,s20,[x20,#0x60]
+//   2: b sub_10D32B8
+//   0x9E8810: bl cave (was bl sub_10D32B8)
+
+@enabled
+// Cutscenes: NVN present interval 1 in cinematics (was CINC W0,W8,NE = 2)
+001D742C E003082A
+// Cutscenes: keep the frame timer delta (was FCSEL S0,S1,S0,GT = audio stream delta)
+0119A47C 1F2003D5
+// IngameMenuRoot update: BL sub_81020 real frame seconds (was BL sub_80E30 = 1/fps)
+00B2EFAC 1D48D597
+// MainMenu root update: BL sub_81020 real frame seconds (was BL sub_80E30 = 1/fps)
+00B348E8 CE31D597
+// Push spread over updates: FMOV S0,#12.0 / FMUL S0,S0,S8 (dt) / LDR S1 / NOP (was 0.2 per update)
+009E2CFC 0010251E
+009E2D00 0008281E
+009E2D08 1F2003D5
+// Physics: compact matrix copy in sub_978C24, then the sweep correction cave
+00978E70 B0477DAD
+00978E74 B24F7EAD
+00978E78 6AE20291
+00978E7C 504500AD
+00978E80 524D01AD
+00978E84 60C600BD
+00978E88 61D600BD
+00978E8C 62E600BD
+00978E90 18000014
+00978E94 09053990
+00978E98 29013F91
+00978E9C 2A0140F9
+00978EA0 5F0118EB
+00978EA4 21020054
+00978EA8 3F0100F9
+00978EAC 6A9E00F0
+00978EB0 4A9541F9
+00978EB4 504540BD
+00978EB8 103A281E
+00978EBC 100A281E
+00978EC0 3149412D
+00978EC4 93524C2D
+00978EC8 334E101F
+00978ECC 0B2F6AF9
+00978ED0 75B540BD
+00978ED4 16DF41BD
+00978ED8 C022351E
+00978EDC 4D000054
+00978EE0 5452101F
+00978EE4 93520C2D
+00978EE8 F4681D14
+00978EEC 1F2003D5
+// Physics: Samus' collision sweep calls the cave first (was BL sub_10D32B8)
+009E8810 A141FE97
+// Physics: force integrator tail publishes F/2 for its actor
+010D1A2C 68620791
+010D1A30 0101402D
+010D1A34 020940BD
+010D1A38 0311462D
+010D1A3C 053940BD
+010D1A40 6104081F
+010D1A44 8000081F
+010D1A48 A208081F
+010D1A4C 0101002D
+010D1A50 020900BD
+010D1A54 1F1900F9
+010D1A58 1F3900B9
+010D1A5C 1FC100F8
+010D1A60 1F1500B9
+010D1A64 06102C1E
+010D1A68 6308261E
+010D1A6C 8408261E
+010D1A70 29CA38F0
+010D1A74 33E107F9
+010D1A78 23C90FBD
+010D1A7C 24CD0FBD
+@stop
+
+// Offsets reverse-engineered against Metroid Dread 2.1.0 (MercurySteam engine,
+// NVN). The retail build is symbol-stripped; every site was located by
+// structure and byte-verified against the IDB before being written.
+//
+// https://github.com/RAMDRAGONS/switch-patches
