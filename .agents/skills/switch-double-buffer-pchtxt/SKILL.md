@@ -1,5 +1,5 @@
 ---
-name: writing-double-buffer-patches
+name: switch-double-buffer-pchtxt
 description: Use when checking whether a Switch game is double or triple buffered, forcing a 2-texture NVN swapchain to cut input latency, or writing a [Double Buffering] pchtxt, including games that switch between 2 and 3 textures at runtime (sead GameFrameworkNx, Unity NX player, nn::gfx SwapChain, raw NVN)
 ---
 

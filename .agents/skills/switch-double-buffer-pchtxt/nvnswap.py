@@ -1,6 +1,6 @@
 """Swapchain helpers for the IDA MCP. Load after the using-ida-mcp prelude:
 
-    exec(open('.../writing-double-buffer-patches/nvnswap.py').read())
+    exec(open('.../switch-double-buffer-pchtxt/nvnswap.py').read())
     swap_report()
 
 Never name a top-level loop variable `nm`: the prelude defines nm() and xr() calls it.
